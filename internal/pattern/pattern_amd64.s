@@ -1,3 +1,5 @@
+//go:build !purego
+
 #include "textflag.h"
 
 // Extract eight overlapping 15-bit windows. Each shuffle builds a big-endian

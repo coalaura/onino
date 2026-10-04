@@ -11,20 +11,26 @@ const (
 	matcherScans
 	matcherCharacters
 	matcherGeneral
+	matcherDictionary
 )
 
 // Matcher is an immutable, concurrency-safe OR of compiled patterns. Its zero
 // value matches nothing. Input is interpreted as lowercase, unpadded RFC 4648
 // base32, without constructing the encoded string.
 type Matcher struct {
-	single     wordProbe
-	kind       uint8
-	offset     uint8
-	rest       *bitPattern
-	scans      []scanPlan
-	scanChecks []*[encodedSize]bitPattern
-	characters []characterSearch
-	tables     [4]probeTable
+	single        wordProbe
+	kind          uint8
+	offset        uint8
+	rest          *bitPattern
+	scans         []scanPlan
+	scanChecks    []*[encodedSize]bitPattern
+	characters    []characterSearch
+	tables        [4]probeTable
+	signFilter    *Matcher
+	signDependent bool
+	frequent      bool
+	dictionary    *tripletDictionary
+	ignoreSign    bool
 }
 
 type wordProbe struct {
@@ -52,6 +58,14 @@ type scanPlan struct {
 	value     uint32
 }
 
+// SignFilter returns a necessary-condition matcher that ignores only byte 31
+// bit 7, or nil when eagerly completing the sign is preferable. A surviving
+// candidate must have its real sign completed and pass Match before acceptance.
+// The filter can be the receiver when none of its patterns inspect that bit.
+func (matcher *Matcher) SignFilter() *Matcher {
+	return matcher.signFilter
+}
+
 // Match reports whether any compiled pattern matches data. It performs no
 // allocation or base32 encoding and may be called concurrently.
 //
@@ -71,6 +85,8 @@ func (matcher *Matcher) Match(data [32]byte) bool {
 		return matcher.matchScans(&data)
 	case matcherCharacters:
 		return matcher.matchCharacters(&data)
+	case matcherDictionary:
+		return matcher.dictionary.match(&data, matcher.ignoreSign)
 	}
 
 	return matcher.matchGeneral(&data)
@@ -102,6 +118,10 @@ func (matcher *Matcher) matchGeneral(data *[32]byte) bool {
 				return true
 			}
 		}
+	}
+
+	if matcher.dictionary != nil && matcher.dictionary.match(data, matcher.ignoreSign) {
+		return true
 	}
 
 	return matcher.matchScans(data)

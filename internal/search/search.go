@@ -21,6 +21,35 @@ type Stats struct {
 // recipient may retain it. Returning an error stops the search.
 type SaveFunc func(key onion.Key) error
 
+func (state *generator) searchBatch(matcher *pattern.Matcher, save SaveFunc, stats *Stats) error {
+	filter := matcher.SignFilter()
+
+	state.nextBatch(filter != nil)
+
+	for index := range state.publicKeys {
+		stats.Checked++
+
+		if !state.matches(index, matcher, filter) {
+			continue
+		}
+
+		err := save(state.key(index))
+		if err != nil {
+			return fmt.Errorf("save matching key: %w", err)
+		}
+
+		stats.Saved++
+
+		// Each saved lane must start a new independent walk before advancing.
+		err = state.reseed(index)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // Run searches until cancellation or an error. It uses one worker, checks every
 // candidate with matcher, and keeps searching after each successfully saved key.
 // Matching is over the public key's standalone 52-symbol base32 encoding.
@@ -56,28 +85,9 @@ func Run(ctx context.Context, matcher *pattern.Matcher, save SaveFunc) (Stats, e
 			}
 		}
 
-		state.next()
-
-		for index := range state.publicKeys {
-			stats.Checked++
-
-			if !matcher.Match(state.publicKeys[index]) {
-				continue
-			}
-
-			err = save(state.key(index))
-			if err != nil {
-				return stats, fmt.Errorf("save matching key: %w", err)
-			}
-
-			stats.Saved++
-
-			// Never export two related scalars from the same walk. Other lanes
-			// are independently seeded, so every hit in this batch can be saved.
-			err = state.reseed(index)
-			if err != nil {
-				return stats, err
-			}
+		err = state.searchBatch(matcher, save, &stats)
+		if err != nil {
+			return stats, err
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"filippo.io/edwards25519"
 
 	"github.com/coalaura/onino/internal/onion"
+	"github.com/coalaura/onino/internal/pattern"
 )
 
 const (
@@ -82,9 +83,26 @@ func (generator *generator) reset() error {
 }
 
 func (generator *generator) next() {
+	generator.nextBatch(false)
+}
+
+func (generator *generator) nextBatch(deferSign bool) {
 	generator.round++
 
-	generatePoints(generator.points[:], generator.products[:], generator.publicKeys[:])
+	generateBatch(generator.points[:], generator.products[:], generator.publicKeys[:], deferSign)
+}
+
+//go:inline
+func (generator *generator) matches(index int, matcher, filter *pattern.Matcher) bool {
+	if filter != nil {
+		if !filter.Match(generator.publicKeys[index]) {
+			return false
+		}
+
+		completeSign(&generator.points[index], &generator.products[index], &generator.publicKeys[index])
+	}
+
+	return matcher.Match(generator.publicKeys[index])
 }
 
 func (generator *generator) key(index int) onion.Key {

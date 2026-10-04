@@ -219,6 +219,19 @@ func TestSearchBatchAllocations(t *testing.T) {
 	if allocations != 0 {
 		t.Fatalf("search batch allocated %v times", allocations)
 	}
+
+	var stats Stats
+
+	allocations = testing.AllocsPerRun(100, func() {
+		err = state.searchBatch(matcher, benchmarkSave, &stats)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if allocations != 0 {
+		t.Fatalf("deferred search batch allocated %v times", allocations)
+	}
 }
 
 func testGenerator(tb testing.TB) *generator {

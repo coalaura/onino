@@ -64,16 +64,14 @@ func (point *extendedPoint) advance() {
 }
 
 func generatePoints(points []extendedPoint, products []fieldElement, publicKeys [][32]byte) {
+	generateBatch(points, products, publicKeys, false)
+}
+
+func generateBatch(points []extendedPoint, products []fieldElement, publicKeys [][32]byte, deferSign bool) {
 	// Montgomery's trick: one inversion for the entire batch, with 3*(n-1)
 	// extra multiplications. Accumulate products while advancing each point
 	// to avoid a separate strided pass over the coordinates.
-	points[0].advance()
-	products[0] = points[0].zCoordinate
-
-	for index := 1; index < len(points); index++ {
-		points[index].advance()
-		products[index].multiply(&products[index-1], &points[index].zCoordinate)
-	}
+	advanceBatch(points, products)
 
 	var (
 		reciprocal fieldElement
@@ -95,11 +93,37 @@ func generatePoints(points []extendedPoint, products []fieldElement, publicKeys 
 		}
 
 		affineY.multiply(&point.yCoordinate, &inverseZ)
-		affineX.multiply(&point.xCoordinate, &inverseZ)
-
 		affineY.putBytes(&publicKeys[index])
 
+		if deferSign {
+			// Reverse traversal has consumed this prefix product. Retain inverse
+			// Z here until matching, without touching the next walk's projective X.
+			products[index] = inverseZ
+
+			continue
+		}
+
+		affineX.multiply(&point.xCoordinate, &inverseZ)
+
 		publicKeys[index][31] |= affineX.isNegative() << 7
+	}
+}
+
+func completeSign(point *extendedPoint, inverseZ *fieldElement, publicKey *[32]byte) {
+	var affineX fieldElement
+
+	affineX.multiply(&point.xCoordinate, inverseZ)
+
+	publicKey[31] = publicKey[31]&0x7f | affineX.isNegative()<<7
+}
+
+func advanceBatchGeneric(points []extendedPoint, products []fieldElement) {
+	points[0].advance()
+	products[0] = points[0].zCoordinate
+
+	for index := 1; index < len(points); index++ {
+		points[index].advance()
+		products[index].multiply(&products[index-1], &points[index].zCoordinate)
 	}
 }
 

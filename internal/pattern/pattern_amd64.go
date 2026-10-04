@@ -1,3 +1,5 @@
+//go:build !purego
+
 package pattern
 
 var vectorAvailable = supportsAVX2()

@@ -61,6 +61,14 @@ func (matcher *Matcher) finish() {
 		}
 	}
 
+	if matcher.dictionary != nil {
+		if probeCount == 0 && len(matcher.scans) == 0 && len(matcher.characters) == 0 {
+			matcher.kind = matcherDictionary
+		}
+
+		return
+	}
+
 	if len(matcher.scans) != 0 || len(matcher.characters) != 0 {
 		if probeCount == 0 && len(matcher.characters) == 0 {
 			matcher.kind = matcherScans
@@ -100,7 +108,7 @@ func (matcher *Matcher) finish() {
 	}
 }
 
-func (matcher *Matcher) addPattern(parsed parsedPattern, vector bool) bool {
+func (matcher *Matcher) addPattern(parsed parsedPattern, vector bool, ignoreSign bool) bool {
 	if parsed.anchored {
 		var pattern bitPattern
 
@@ -108,12 +116,17 @@ func (matcher *Matcher) addPattern(parsed parsedPattern, vector bool) bool {
 			return false
 		}
 
+		matcher.prepareSign(&pattern, ignoreSign)
 		matcher.addProbe(pattern)
+
+		matcher.frequent = matcher.frequent || len(parsed.prefix)+len(parsed.suffix) <= 1
 
 		return true
 	}
 
 	if len(parsed.literal) == 1 {
+		matcher.frequent = true
+		matcher.signDependent = true
 		value := symbolValue(parsed.literal[0])
 
 		search := characterSearch{
@@ -166,8 +179,12 @@ func (matcher *Matcher) addPattern(parsed parsedPattern, vector bool) bool {
 		}
 
 		possible = true
+		matcher.prepareSign(&pattern, ignoreSign)
 
-		if !vector {
+		// The unknown bit belongs to symbol 49 (zero-based). A triplet filter
+		// crossing it must become a masked exact probe, not an exact triplet.
+		crossesSign := position <= 49 && position+min(3, len(parsed.literal)) > 49
+		if !vector || ignoreSign && crossesSign {
 			matcher.addProbe(pattern)
 
 			continue
@@ -194,6 +211,15 @@ func (matcher *Matcher) addPattern(parsed parsedPattern, vector bool) bool {
 	return possible
 }
 
+func (matcher *Matcher) prepareSign(pattern *bitPattern, ignoreSign bool) {
+	matcher.signDependent = matcher.signDependent || pattern.mask[3]&(uint64(1)<<63) != 0
+
+	if ignoreSign {
+		pattern.mask[3] &^= uint64(1) << 63
+		pattern.value[3] &^= uint64(1) << 63
+	}
+}
+
 // CompilePatterns accepts lowercase a-z, digits 2-7, and these dot forms:
 // "text." (prefix), ".text" (suffix), "pre.suf" (both), ".text."
 // (strictly interior), and "text" (anywhere). Prefix and suffix may overlap
@@ -205,8 +231,38 @@ func CompilePatterns(patterns []string) (*Matcher, error) {
 }
 
 func compilePatterns(patterns []string, vector bool) (*Matcher, error) {
+	matcher, err := compileMatcher(patterns, vector, false)
+	if err != nil || matcher.frequent {
+		return matcher, err
+	}
+
+	if !matcher.signDependent {
+		matcher.signFilter = matcher
+
+		return matcher, nil
+	}
+
+	if matcher.kind == matcherDictionary {
+		filter := *matcher
+		filter.ignoreSign = true
+
+		matcher.signFilter = &filter
+
+		return matcher, nil
+	}
+
+	matcher.signFilter, err = compileMatcher(patterns, vector, true)
+
+	return matcher, err
+}
+
+func compileMatcher(patterns []string, vector bool, ignoreSign bool) (*Matcher, error) {
 	matcher := &Matcher{kind: matcherGeneral}
+
 	seen := make(map[string]struct{}, len(patterns))
+	parsedPatterns := make([]parsedPattern, 0, len(patterns))
+
+	eligible := 0
 
 	for index, text := range patterns {
 		if _, exists := seen[text]; exists {
@@ -220,9 +276,36 @@ func compilePatterns(patterns []string, vector bool) (*Matcher, error) {
 			return nil, fmt.Errorf("pattern %d %q: %w", index, text, err)
 		}
 
-		possible := matcher.addPattern(parsed, vector)
+		var validation bitPattern
+
+		possible := false
+
+		if parsed.anchored {
+			possible = addLiteral(&validation, parsed.prefix, 0) && addLiteral(&validation, parsed.suffix, encodedSize-len(parsed.suffix))
+		} else if parsed.first <= parsed.last {
+			possible = addLiteral(&validation, parsed.literal, parsed.first)
+		}
+
 		if !possible {
 			return nil, fmt.Errorf("pattern %d %q cannot match a 32-byte base32 value", index, text)
+		}
+
+		parsedPatterns = append(parsedPatterns, parsed)
+
+		if !parsed.anchored && len(parsed.literal) >= 3 && parsed.last-parsed.first >= 8 {
+			eligible++
+		}
+	}
+
+	if eligible >= dictionaryThreshold {
+		matcher.dictionary = compileDictionary(parsedPatterns)
+		matcher.ignoreSign = ignoreSign
+		matcher.signDependent = true
+	}
+
+	for _, parsed := range parsedPatterns {
+		if matcher.dictionary == nil || len(anchorLiteral(parsed)) < 3 {
+			matcher.addPattern(parsed, vector, ignoreSign)
 		}
 	}
 
