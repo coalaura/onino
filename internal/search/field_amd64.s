@@ -26,5 +26,5 @@ TEXT ·multiplyBMI2(SB), NOSPLIT, $0-24
 	MOVQ result+0(FP), AX
 	MOVQ left+8(FP), BX
 	MOVQ right+16(FP), CX
-	PRODUCT()
+	PRODUCT(0, 0, 0)
 	RET

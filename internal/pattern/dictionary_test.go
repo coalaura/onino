@@ -15,6 +15,39 @@ type dictionaryBenchmarkCase struct {
 
 var dictionaryBenchmarkHit bool
 
+func TestDictionaryAlignments(t *testing.T) {
+	random := rand.New(rand.NewPCG(29, 255))
+	background := dictionaryPatterns(128)
+	lengths := []int{2, 3, 4, 5, 6, 7, 10, 49, 50, 51, 52}
+
+	for _, length := range lengths {
+		for start := 0; start+length <= encodedSize; start++ {
+			data := randomInput(random)
+			encoded := testEncoding.EncodeToString(data[:])
+			literal := encoded[start : start+length]
+			forms := []string{literal, encoded[:start+length] + ".", "." + encoded[start:], encoded[:start+length] + "." + encoded[start:]}
+
+			if start > 0 && start+length < encodedSize {
+				forms = append(forms, "." + literal + ".")
+			}
+
+			for _, text := range forms {
+				patterns := append(slices.Clip(background), text)
+
+				matcher, err := CompilePatterns(patterns)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				checkDictionary(t, matcher, patterns, data)
+				data[31] ^= 128
+				checkDictionary(t, matcher, patterns, data)
+				data[31] ^= 128
+			}
+		}
+	}
+}
+
 func TestDictionaryDifferential(t *testing.T) {
 	random := rand.New(rand.NewPCG(512, 50))
 

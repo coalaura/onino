@@ -61,6 +61,14 @@ func (matcher *Matcher) finish() {
 		}
 	}
 
+	if matcher.anchors != nil {
+		if probeCount == 0 && len(matcher.scans) == 0 && len(matcher.characters) == 0 && matcher.dictionary == nil {
+			matcher.kind = matcherAnchors
+		}
+
+		return
+	}
+
 	if matcher.dictionary != nil {
 		if probeCount == 0 && len(matcher.scans) == 0 && len(matcher.characters) == 0 {
 			matcher.kind = matcherDictionary
@@ -242,7 +250,7 @@ func compilePatterns(patterns []string, vector bool) (*Matcher, error) {
 		return matcher, nil
 	}
 
-	if matcher.kind == matcherDictionary {
+	if matcher.kind == matcherDictionary || matcher.kind == matcherAnchors {
 		filter := *matcher
 		filter.ignoreSign = true
 
@@ -262,7 +270,10 @@ func compileMatcher(patterns []string, vector bool, ignoreSign bool) (*Matcher, 
 	seen := make(map[string]struct{}, len(patterns))
 	parsedPatterns := make([]parsedPattern, 0, len(patterns))
 
-	eligible := 0
+	var (
+		eligible int
+		anchored int
+	)
 
 	for index, text := range patterns {
 		if _, exists := seen[text]; exists {
@@ -292,7 +303,11 @@ func compileMatcher(patterns []string, vector bool, ignoreSign bool) (*Matcher, 
 
 		parsedPatterns = append(parsedPatterns, parsed)
 
-		if !parsed.anchored && len(parsed.literal) >= 3 && parsed.last-parsed.first >= 8 {
+		if indexedAnchor(parsed) {
+			anchored++
+		}
+
+		if !parsed.anchored && len(parsed.literal) >= dictionaryStride+2 && parsed.last-parsed.first >= 8 {
 			eligible++
 		}
 	}
@@ -303,8 +318,18 @@ func compileMatcher(patterns []string, vector bool, ignoreSign bool) (*Matcher, 
 		matcher.signDependent = true
 	}
 
+	if anchored >= anchoredThreshold && matcher.dictionary == nil {
+		matcher.anchors = compileAnchors(parsedPatterns)
+		matcher.ignoreSign = ignoreSign
+		matcher.signDependent = true
+	}
+
 	for _, parsed := range parsedPatterns {
-		if matcher.dictionary == nil || len(anchorLiteral(parsed)) < 3 {
+		if matcher.anchors != nil && indexedAnchor(parsed) {
+			continue
+		}
+
+		if matcher.dictionary == nil || len(anchorLiteral(parsed)) < dictionaryStride+2 {
 			matcher.addPattern(parsed, vector, ignoreSign)
 		}
 	}

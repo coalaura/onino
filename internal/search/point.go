@@ -82,6 +82,14 @@ func generateBatch(points []extendedPoint, products []fieldElement, publicKeys [
 
 	reciprocal.invert(&products[len(points)-1])
 
+	if deferSign && fastFieldAvailable {
+		last := len(points) - 1
+
+		normalizeBMI2(&points[last], &products[last], &publicKeys[last], len(points), &reciprocal)
+
+		return
+	}
+
 	for index := len(points) - 1; index >= 0; index-- {
 		point := &points[index]
 

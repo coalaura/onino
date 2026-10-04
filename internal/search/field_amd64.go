@@ -15,6 +15,10 @@ func multiplyBMI2(result, left, right *fieldElement)
 //go:abiinternal point=AX scratch=BX step=CX ->
 func advanceBMI2(point *extendedPoint, scratch *[8]fieldElement, step *affineStep)
 
+//go:noescape
+//go:abiinternal point=AX product=BX publicKey=CX count=DI reciprocal=SI ->
+func normalizeBMI2(point *extendedPoint, product *fieldElement, publicKey *[32]byte, count int, reciprocal *fieldElement)
+
 func advanceBatch(points []extendedPoint, products []fieldElement) {
 	if !fastFieldAvailable {
 		advanceBatchGeneric(points, products)

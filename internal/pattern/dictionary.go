@@ -6,11 +6,17 @@ import (
 	"slices"
 )
 
-const dictionaryThreshold = 128
+const (
+	dictionaryThreshold = 128
+	dictionaryStride    = 4
+)
 
 // The bitmap and rank directory occupy 5 KiB regardless of dictionary size.
 // Only occupied triplets have buckets; verifiers retain one literal rather than
 // a 52-position table. Position masks reject disallowed anchors before checking.
+// One anchor per offset residue covers every start when scanning every fourth
+// triplet. Anchors share immutable parsed verifiers; literals shorter than six
+// symbols retain the existing matcher because they cannot cover all residues.
 type tripletDictionary struct {
 	membership [512]uint64
 	ranks      [512]uint16
@@ -25,7 +31,7 @@ type tripletBucket struct {
 }
 
 type dictionaryCheck struct {
-	pattern parsedPattern
+	pattern *parsedPattern
 	offset  int
 }
 
@@ -42,8 +48,12 @@ func (dictionary *tripletDictionary) match(data *[32]byte, ignoreSign bool) bool
 	return dictionary.matchWindows(word, 40, 10, data, ignoreSign)
 }
 
+//go:inline
 func (dictionary *tripletDictionary) matchWindows(word uint64, first, count int, data *[32]byte, ignoreSign bool) bool {
-	for position := first; position < first+count; position++ {
+	skip := (dictionaryStride - first%dictionaryStride) % dictionaryStride
+	word <<= skip * 5
+
+	for position := first + skip; position < first+count; position += dictionaryStride {
 		triplet := uint16(word >> 49)
 		if dictionary.matchTriplet(triplet, position, data, ignoreSign) {
 			return true
@@ -57,7 +67,7 @@ func (dictionary *tripletDictionary) matchWindows(word uint64, first, count int,
 			}
 		}
 
-		word <<= 5
+		word <<= 5 * dictionaryStride
 	}
 
 	return false
@@ -82,7 +92,7 @@ func (dictionary *tripletDictionary) matchTriplet(triplet uint16, position int, 
 	for index := bucket.first; index < bucket.end; index++ {
 		check := &dictionary.checks[index]
 
-		pattern := &check.pattern
+		pattern := check.pattern
 		if pattern.anchored {
 			if matchLiteral(data, pattern.prefix, 0, ignoreSign) && matchLiteral(data, pattern.suffix, encodedSize-len(pattern.suffix), ignoreSign) {
 				return true
@@ -117,28 +127,44 @@ func compileDictionary(patterns []parsedPattern) *tripletDictionary {
 
 	groups := make(map[uint16][]dictionaryCheck, len(patterns))
 
-	for _, pattern := range patterns {
-		literal := anchorLiteral(pattern)
-		if len(literal) < 3 {
+	for index := range patterns {
+		pattern := &patterns[index]
+
+		literal := anchorLiteral(*pattern)
+		if len(literal) < dictionaryStride+2 {
 			continue
 		}
 
-		offset := 0
-		triplet := literalTriplet(literal, offset)
+		base := 0
+		residues := dictionaryStride
 
-		for candidate := 1; candidate+3 <= len(literal); candidate++ {
-			value := literalTriplet(literal, candidate)
-			if frequencies[value] < frequencies[triplet] {
-				offset = candidate
-				triplet = value
+		if pattern.anchored {
+			residues = 1
+
+			if len(pattern.suffix) > len(pattern.prefix) {
+				base = encodedSize - len(pattern.suffix)
 			}
 		}
 
-		if pattern.anchored && len(pattern.suffix) > len(pattern.prefix) {
-			offset += encodedSize - len(pattern.suffix)
-		}
+		for residue := range residues {
+			offset := residue
 
-		groups[triplet] = append(groups[triplet], dictionaryCheck{pattern: pattern, offset: offset})
+			if pattern.anchored {
+				offset = (dictionaryStride - base%dictionaryStride) % dictionaryStride
+			}
+
+			triplet := literalTriplet(literal, offset)
+
+			for candidate := offset + dictionaryStride; candidate+3 <= len(literal); candidate += dictionaryStride {
+				value := literalTriplet(literal, candidate)
+				if frequencies[value] < frequencies[triplet] {
+					offset = candidate
+					triplet = value
+				}
+			}
+
+			groups[triplet] = append(groups[triplet], dictionaryCheck{pattern: pattern, offset: base + offset})
+		}
 	}
 
 	keys := make([]uint16, 0, len(groups))
@@ -151,7 +177,7 @@ func compileDictionary(patterns []parsedPattern) *tripletDictionary {
 
 	dictionary := &tripletDictionary{
 		buckets: make([]tripletBucket, 0, len(groups)),
-		checks:  make([]dictionaryCheck, 0, len(patterns)),
+		checks:  make([]dictionaryCheck, 0, len(patterns)*dictionaryStride),
 	}
 
 	for _, triplet := range keys {
@@ -202,6 +228,7 @@ func literalTriplet(literal string, offset int) uint16 {
 	return uint16(symbolValue(literal[offset]))<<10 | uint16(symbolValue(literal[offset+1]))<<5 | uint16(symbolValue(literal[offset+2]))
 }
 
+//go:inline
 func matchLiteral(data *[32]byte, literal string, first int, ignoreSign bool) bool {
 	for index := range len(literal) {
 		position := first + index

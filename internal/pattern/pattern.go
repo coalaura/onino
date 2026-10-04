@@ -12,6 +12,7 @@ const (
 	matcherCharacters
 	matcherGeneral
 	matcherDictionary
+	matcherAnchors
 )
 
 // Matcher is an immutable, concurrency-safe OR of compiled patterns. Its zero
@@ -30,6 +31,7 @@ type Matcher struct {
 	signDependent bool
 	frequent      bool
 	dictionary    *tripletDictionary
+	anchors       *anchoredDictionary
 	ignoreSign    bool
 }
 
@@ -87,12 +89,18 @@ func (matcher *Matcher) Match(data [32]byte) bool {
 		return matcher.matchCharacters(&data)
 	case matcherDictionary:
 		return matcher.dictionary.match(&data, matcher.ignoreSign)
+	case matcherAnchors:
+		return matcher.anchors.match(&data, matcher.ignoreSign)
 	}
 
 	return matcher.matchGeneral(&data)
 }
 
 func (matcher *Matcher) matchGeneral(data *[32]byte) bool {
+	if matcher.anchors != nil && matcher.anchors.match(data, matcher.ignoreSign) {
+		return true
+	}
+
 	if matcher.matchCharacters(data) {
 		return true
 	}

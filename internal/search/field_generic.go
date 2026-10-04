@@ -11,3 +11,7 @@ func multiplyBMI2(result, left, right *fieldElement) {
 func advanceBatch(points []extendedPoint, products []fieldElement) {
 	advanceBatchGeneric(points, products)
 }
+
+func normalizeBMI2(point *extendedPoint, product *fieldElement, publicKey *[32]byte, count int, reciprocal *fieldElement) {
+	panic("unavailable")
+}

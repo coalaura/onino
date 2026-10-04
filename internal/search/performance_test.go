@@ -231,10 +231,16 @@ func BenchmarkFullSearch(b *testing.B) {
 
 func BenchmarkSearchSizes(b *testing.B) {
 	sizes := []int{128, 256, 512, 1024, 2048}
+	anchored := benchmarkDictionary(512, false)
+
+	for index := range anchored {
+		anchored[index] += "."
+	}
 
 	cases := []benchmarkCase{
 		{name: "prefix", patterns: []string{"somethingrare."}},
 		{name: "512", patterns: benchmarkDictionary(512, false)},
+		{name: "anchored512", patterns: anchored},
 	}
 
 	for _, test := range cases {

@@ -39,40 +39,31 @@ A full-width literal must respect the final symbol too. Interior literals can co
 ## Implementation
 
 - Anchored patterns compile to raw-bit masks. A single short anchored pattern reduces to a 64-bit masked comparison. Wider constraints first test their most selective word, then verify the remaining bits only on a candidate hit.
+- At 64 eligible anchored patterns, fixed-position 15-bit membership indexes select exact-verification buckets. Prefixes need three symbols, suffixes four; combined anchors choose the less-populated fragment. The suffix fragment excludes the compressed-point sign so the index can also serve deferred-sign filtering.
 - Single-character searches compare eight packed five-bit symbols at once with scalar word operations. Endpoint masks enforce strictly interior matches without borrow-related false positives.
 - On AVX2-capable amd64, substring searches extract overlapping 15-bit windows once into vector registers, then reuse them across the pattern list. These are raw-bit windows, not ASCII or an encoded buffer. Two- and three-character filters are exact; longer literals verify their complete masks on candidate hits.
 - Each AVX2 filter is 16 bytes with no struct padding. Four filters occupy 64 bytes; larger verification data is stored separately and accessed only after a filter hit. Scalar probes use the same hot/cold separation. Searches with very few possible positions use scalar probes to avoid vector setup cost.
+- At 128 eligible unanchored patterns, a portable triplet dictionary replaces per-pattern scanning. Eligible literals have at least six symbols and nine permitted starts. One anchor per offset residue covers every start while scanning only every fourth triplet; anchors share their exact parsed verifier. Short alternatives retain existing paths. The bitmap and rank directory use 5 KiB, with compact buckets for occupied triplets.
+- `SignFilter` provides a necessary-condition matcher for incomplete Y encodings. Only byte 31's high bit is ignored; it affects base32 character 50, not 52. Callers complete the actual sign and run exact `Match` before accepting a key. Exact and signless dictionary matchers share immutable indexes.
 - AVX2 detection checks both CPU support and operating-system vector-state support. Other CPUs and architectures use portable scalar matching. The vector routine loads exactly 32 input bytes without overreading and synthesizes the canonical final padding bits.
 - PACE force-inlines the small dispatch paths and calls the assembly leaf through `//go:abiinternal`, passing arguments and results in registers. Stock Go is also supported through its normal assembly ABI. No external dependencies are needed.
 
 ## Measurements
 
-PACE, Windows/amd64, AMD Ryzen 9 9950X3D, median of three 250 ms runs. Each benchmark reuses 256 deterministic inputs; these are warm-cache throughput measurements. Random inputs are mostly misses except for short literals. The baseline also allocates nothing and parses its patterns before timing.
+Current [end-to-end measurements](../../measurements/PASS2.md) use PACE 1.27.1 on a Ryzen 9 9950X3D, one pinned Windows/amd64 worker and five alternating one-second samples. Against revision `adb389f`, full search with 512 anywhere patterns improved from 138.20 to 101.80 ns/key; 512 prefix patterns improved from 224.20 to 74.77 ns/key. These include generation and the production hit-handling loop, not matcher-only cost. Ordinary search remains allocation-free. Compiling 512 unanchored patterns increased from 0.37 to 0.61 ms because four anchor groups are built per pattern.
 
-| Pattern workload | Compiled, ns/input | Encode then search, ns/input |
-| --- | ---: | ---: |
-| Prefix | 0.93 | 14.71 |
-| Suffix | 1.06 | 17.52 |
-| Prefix and suffix | 1.03 | 16.13 |
-| One-character substring | 4.06 | 22.23 |
-| Two-character substring | 10.09 | 20.70 |
-| Six-character substring | 9.18 | 20.75 |
-| Strictly interior substring | 9.17 | 21.17 |
-| Mixed five-pattern set | 10.35 | 34.58 |
-| Eight substring patterns | 12.15 | 69.59 |
-
-Guaranteed-hit benchmarks measured approximately 1.1-1.2 ns for a short prefix or suffix, 2.5 ns for prefix plus suffix, 13.2 ns for a longer substring and 15.7 ns when the guaranteed hit is the last of eight substring patterns. Random six-character pattern sets measured 9.6, 12.6, 36.0 and 230.4 ns/input for 1, 8, 64 and 512 patterns respectively. Every matching benchmark reported **0 B/op and 0 allocs/op**.
-
-These results depend on the CPU, compiler, pattern set, hit rate and cache state; they are not a guarantee of the fastest possible implementation for every workload.
+Small/medium sets keep the previous fast paths. A shared AVX2 register-table prefilter was slower in complete-search screens and was removed. Thresholds and first-hit versus miss costs depend on the pattern set, machine and compiler; the notes retain the measured tradeoffs.
 
 Run these commands from the repository root:
 
 ```sh
-pace test ./internal/pattern
-go test ./internal/pattern
+pace test -vet=off ./internal/pattern
+go test -vet=off ./internal/pattern
 vet --tests ./internal/pattern
-pace test ./internal/pattern -run '^$' -bench . -benchmem -benchtime=250ms -count=3
-pace test ./internal/pattern -run '^$' -fuzz '^FuzzMatcher$' -fuzztime=15s -parallel=4
+pace test -vet=off ./internal/pattern -run '^$' -bench . -benchmem -benchtime=250ms -count=3 -cpu=1
+pace test -vet=off ./internal/pattern -run '^$' -fuzz '^FuzzMatcher$' -fuzztime=10s -parallel=1
+pace test -vet=off ./internal/pattern -run '^$' -fuzz '^FuzzDictionary$' -fuzztime=10s -parallel=1
+pace test -vet=off ./internal/pattern -run '^$' -fuzz '^FuzzAnchoredDictionary$' -fuzztime=10s -parallel=1
 ```
 
-Tests compare both scalar and AVX2 matching against the standard library's base32 encoder and independent string matching, including every possible literal length/alignment, canonical final-symbol constraints, all single-character positions, conflicting overlaps, false-candidate continuation, concurrent use and zero matching allocations. Assembly-facing data layouts are checked explicitly. The latest fuzz run passed 3,007,669 cases.
+Tests compare scalar, AVX2 and indexed matching against the standard library's base32 encoder and independent string matching, including every possible literal length/alignment, both signs, canonical final-symbol constraints, all single-character positions, conflicting overlaps, false-candidate continuation, concurrent use and zero matching allocations. Assembly-facing data layouts are checked explicitly. Use `GOMAXPROCS=1` for bounded single-worker runs and repeat with `-tags=purego` for real portable fallback coverage.
