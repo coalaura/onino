@@ -6,26 +6,26 @@ import (
 )
 
 type extendedPoint struct {
-	xCoordinate field.Element
-	yCoordinate field.Element
-	zCoordinate field.Element
-	tCoordinate field.Element
+	xCoordinate fieldElement
+	yCoordinate fieldElement
+	zCoordinate fieldElement
+	tCoordinate fieldElement
 }
 
 type affineStep struct {
-	yPlusX  field.Element
-	yMinusX field.Element
-	xy2D    field.Element
+	yPlusX  fieldElement
+	yMinusX fieldElement
+	xy2D    fieldElement
 }
 
 var searchStep = makeSearchStep()
 
 func (point *extendedPoint) set(source *edwards25519.Point) {
 	xCoordinate, yCoordinate, zCoordinate, tCoordinate := source.ExtendedCoordinates()
-	point.xCoordinate = *xCoordinate
-	point.yCoordinate = *yCoordinate
-	point.zCoordinate = *zCoordinate
-	point.tCoordinate = *tCoordinate
+	point.xCoordinate.setField(xCoordinate)
+	point.yCoordinate.setField(yCoordinate)
+	point.zCoordinate.setField(zCoordinate)
+	point.tCoordinate.setField(tCoordinate)
 }
 
 //go:inline
@@ -34,36 +34,36 @@ func (point *extendedPoint) advance() {
 	// Precomputing its three products removes the general-point conversion
 	// and one multiplication from every addition (seven multiplies total).
 	var (
-		plus       field.Element
-		minus      field.Element
-		cross      field.Element
-		doubledZ   field.Element
-		difference field.Element
-		sum        field.Element
-		lower      field.Element
-		upper      field.Element
+		plus       fieldElement
+		minus      fieldElement
+		cross      fieldElement
+		doubledZ   fieldElement
+		difference fieldElement
+		sum        fieldElement
+		lower      fieldElement
+		upper      fieldElement
 	)
 
-	plus.Add(&point.yCoordinate, &point.xCoordinate)
-	minus.Subtract(&point.yCoordinate, &point.xCoordinate)
-	plus.Multiply(&plus, &searchStep.yPlusX)
-	minus.Multiply(&minus, &searchStep.yMinusX)
+	plus.add(&point.yCoordinate, &point.xCoordinate)
+	minus.subtract(&point.yCoordinate, &point.xCoordinate)
+	plus.multiply(&plus, &searchStep.yPlusX)
+	minus.multiply(&minus, &searchStep.yMinusX)
 
-	cross.Multiply(&point.tCoordinate, &searchStep.xy2D)
-	doubledZ.Add(&point.zCoordinate, &point.zCoordinate)
-	difference.Subtract(&plus, &minus)
-	sum.Add(&plus, &minus)
+	cross.multiply(&point.tCoordinate, &searchStep.xy2D)
+	doubledZ.add(&point.zCoordinate, &point.zCoordinate)
+	difference.subtract(&plus, &minus)
+	sum.add(&plus, &minus)
 
-	lower.Subtract(&doubledZ, &cross)
-	upper.Add(&doubledZ, &cross)
+	lower.subtract(&doubledZ, &cross)
+	upper.add(&doubledZ, &cross)
 
-	point.xCoordinate.Multiply(&difference, &lower)
-	point.yCoordinate.Multiply(&sum, &upper)
-	point.zCoordinate.Multiply(&lower, &upper)
-	point.tCoordinate.Multiply(&difference, &sum)
+	point.xCoordinate.multiply(&difference, &lower)
+	point.yCoordinate.multiply(&sum, &upper)
+	point.zCoordinate.multiply(&lower, &upper)
+	point.tCoordinate.multiply(&difference, &sum)
 }
 
-func generatePoints(points []extendedPoint, products []field.Element, publicKeys [][32]byte) {
+func generatePoints(points []extendedPoint, products []fieldElement, publicKeys [][32]byte) {
 	// Montgomery's trick: one inversion for the entire batch, with 3*(n-1)
 	// extra multiplications. Accumulate products while advancing each point
 	// to avoid a separate strided pass over the coordinates.
@@ -72,17 +72,17 @@ func generatePoints(points []extendedPoint, products []field.Element, publicKeys
 
 	for index := 1; index < len(points); index++ {
 		points[index].advance()
-		products[index].Multiply(&products[index-1], &points[index].zCoordinate)
+		products[index].multiply(&products[index-1], &points[index].zCoordinate)
 	}
 
 	var (
-		reciprocal field.Element
-		inverseZ   field.Element
-		affineX    field.Element
-		affineY    field.Element
+		reciprocal fieldElement
+		inverseZ   fieldElement
+		affineX    fieldElement
+		affineY    fieldElement
 	)
 
-	reciprocal.Invert(&products[len(points)-1])
+	reciprocal.invert(&products[len(points)-1])
 
 	for index := len(points) - 1; index >= 0; index-- {
 		point := &points[index]
@@ -90,16 +90,16 @@ func generatePoints(points []extendedPoint, products []field.Element, publicKeys
 		if index == 0 {
 			inverseZ = reciprocal
 		} else {
-			inverseZ.Multiply(&reciprocal, &products[index-1])
-			reciprocal.Multiply(&reciprocal, &point.zCoordinate)
+			inverseZ.multiply(&reciprocal, &products[index-1])
+			reciprocal.multiply(&reciprocal, &point.zCoordinate)
 		}
 
-		affineY.Multiply(&point.yCoordinate, &inverseZ)
-		affineX.Multiply(&point.xCoordinate, &inverseZ)
+		affineY.multiply(&point.yCoordinate, &inverseZ)
+		affineX.multiply(&point.xCoordinate, &inverseZ)
 
-		copy(publicKeys[index][:], affineY.Bytes())
+		affineY.putBytes(&publicKeys[index])
 
-		publicKeys[index][31] |= byte(affineX.IsNegative() << 7)
+		publicKeys[index][31] |= affineX.isNegative() << 7
 	}
 }
 
@@ -129,10 +129,14 @@ func makeSearchStep() affineStep {
 
 	var result affineStep
 
-	result.yPlusX.Add(yCoordinate, xCoordinate)
-	result.yMinusX.Subtract(yCoordinate, xCoordinate)
-	result.xy2D.Multiply(xCoordinate, yCoordinate)
-	result.xy2D.Multiply(&result.xy2D, numerator)
+	result.yPlusX.setField(new(field.Element).Add(yCoordinate, xCoordinate))
+	result.yMinusX.setField(new(field.Element).Subtract(yCoordinate, xCoordinate))
+
+	product := new(field.Element).Multiply(xCoordinate, yCoordinate)
+
+	product.Multiply(product, numerator)
+
+	result.xy2D.setField(product)
 
 	return result
 }

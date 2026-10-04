@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"filippo.io/edwards25519"
-	"filippo.io/edwards25519/field"
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
@@ -47,20 +46,23 @@ func TestBatchesAgainstScalarMultiplication(t *testing.T) {
 
 	for index := range state.publicKeys {
 		key := state.key(index)
+
 		checkKey(t, &key)
 	}
 }
 
 func TestFixedStepExceptionalPoints(t *testing.T) {
 	step := new(edwards25519.Point).MultByCofactor(edwards25519.NewGeneratorPoint())
+
 	references := []*edwards25519.Point{
 		edwards25519.NewIdentityPoint(),
 		new(edwards25519.Point).Set(step),
 		new(edwards25519.Point).Negate(step),
 		new(edwards25519.Point).Add(step, step),
 	}
+
 	points := make([]extendedPoint, len(references))
-	products := make([]field.Element, len(references))
+	products := make([]fieldElement, len(references))
 	publicKeys := make([][32]byte, len(references))
 
 	for index := range points {
@@ -90,7 +92,9 @@ func TestOffsetSecretCarries(t *testing.T) {
 
 		secret[0] &= 248
 		secret[31] = 64
+
 		copy(secret[32:], bytes.Repeat([]byte{0xa5}, 32))
+
 		steps := []uint64{0, 1, 63, reseedRounds}
 
 		for _, count := range steps {

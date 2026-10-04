@@ -8,14 +8,13 @@ import (
 	"math/bits"
 
 	"filippo.io/edwards25519"
-	"filippo.io/edwards25519/field"
 
 	"github.com/coalaura/onino/internal/onion"
 )
 
 const (
 	// Larger batches barely improve inversion amortization while increasing
-	// the hot working set. 512 keeps coordinates and scratch near 116 KiB.
+	// the hot working set. 512 keeps coordinates and scratch near 96 KiB.
 	batchSize    = 512
 	reseedRounds = 1 << 32
 )
@@ -23,7 +22,7 @@ const (
 type generator struct {
 	// Keep hot coordinates and inversion scratch separate from cold secrets.
 	points     [batchSize]extendedPoint
-	products   [batchSize]field.Element
+	products   [batchSize]fieldElement
 	publicKeys [batchSize][32]byte
 	secrets    [batchSize][64]byte
 	started    [batchSize]uint64

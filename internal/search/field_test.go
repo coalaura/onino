@@ -1,0 +1,167 @@
+package search
+
+import (
+	"encoding/binary"
+	"math/big"
+	"math/rand/v2"
+	"testing"
+)
+
+func TestFieldArithmetic(t *testing.T) {
+	values := []fieldElement{
+		{},
+		{1, 0, 0, 0},
+		{0xffffffffffffffff, 0, 0, 0},
+		{0, 0, 0, 0x8000000000000000},
+		{0xffffffffffffffec, 0xffffffffffffffff, 0xffffffffffffffff, 0x7fffffffffffffff},
+		{0xffffffffffffffed, 0xffffffffffffffff, 0xffffffffffffffff, 0x7fffffffffffffff},
+		{0xffffffffffffffee, 0xffffffffffffffff, 0xffffffffffffffff, 0x7fffffffffffffff},
+		{0xffffffffffffffd9, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff},
+		{0xffffffffffffffda, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff},
+		{0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff},
+	}
+
+	for _, left := range values {
+		for _, right := range values {
+			checkFieldArithmetic(t, left, right)
+		}
+	}
+
+	random := rand.New(rand.NewPCG(37, 91))
+
+	for range 20000 {
+		left := fieldElement{random.Uint64(), random.Uint64(), random.Uint64(), random.Uint64()}
+		right := fieldElement{random.Uint64(), random.Uint64(), random.Uint64(), random.Uint64()}
+
+		checkFieldArithmetic(t, left, right)
+	}
+}
+
+func FuzzFieldArithmetic(f *testing.F) {
+	f.Add(make([]byte, 32), make([]byte, 32))
+
+	maximal := make([]byte, 32)
+
+	for index := range maximal {
+		maximal[index] = 255
+	}
+
+	f.Add(maximal, maximal)
+
+	f.Fuzz(func(t *testing.T, leftBytes, rightBytes []byte) {
+		if len(leftBytes) != 32 || len(rightBytes) != 32 {
+			return
+		}
+
+		var (
+			left  fieldElement
+			right fieldElement
+		)
+
+		for index := range left {
+			left[index] = binary.LittleEndian.Uint64(leftBytes[index*8:])
+			right[index] = binary.LittleEndian.Uint64(rightBytes[index*8:])
+		}
+
+		checkFieldArithmetic(t, left, right)
+	})
+}
+
+func checkFieldArithmetic(t *testing.T, left, right fieldElement) {
+	t.Helper()
+
+	prime := new(big.Int).Lsh(big.NewInt(1), 255)
+
+	prime.Sub(prime, big.NewInt(19))
+
+	leftInteger := fieldInteger(left)
+	rightInteger := fieldInteger(right)
+
+	var result fieldElement
+
+	checkFieldResult(t, "canonical", &left, new(big.Int).Mod(leftInteger, prime))
+
+	result.add(&left, &right)
+
+	expected := new(big.Int).Add(leftInteger, rightInteger)
+
+	expected.Mod(expected, prime)
+
+	checkFieldResult(t, "add", &result, expected)
+
+	result.subtract(&left, &right)
+
+	expected.Sub(leftInteger, rightInteger)
+	expected.Mod(expected, prime)
+
+	checkFieldResult(t, "subtract", &result, expected)
+
+	expected.Mul(leftInteger, rightInteger)
+	expected.Mod(expected, prime)
+
+	multiplyGeneric(&result, &left, &right)
+	checkFieldResult(t, "generic multiply", &result, expected)
+
+	result.multiply(&left, &right)
+
+	checkFieldResult(t, "multiply", &result, expected)
+
+	result = left
+	result.multiply(&result, &right)
+
+	checkFieldResult(t, "left alias", &result, expected)
+
+	result = right
+	result.multiply(&left, &result)
+
+	checkFieldResult(t, "right alias", &result, expected)
+
+	result = left
+	result.multiply(&result, &result)
+
+	expected.Mul(leftInteger, leftInteger)
+	expected.Mod(expected, prime)
+
+	checkFieldResult(t, "in-place square", &result, expected)
+
+	result.invert(&left)
+
+	expected.ModInverse(leftInteger, prime)
+
+	if new(big.Int).Mod(leftInteger, prime).Sign() == 0 {
+		expected.SetInt64(0)
+	}
+
+	checkFieldResult(t, "invert", &result, expected)
+}
+
+func checkFieldResult(t *testing.T, operation string, actual *fieldElement, expected *big.Int) {
+	t.Helper()
+
+	var encoded [32]byte
+
+	actual.putBytes(&encoded)
+
+	for index := range 16 {
+		encoded[index], encoded[31-index] = encoded[31-index], encoded[index]
+	}
+
+	integer := new(big.Int).SetBytes(encoded[:])
+	if integer.Cmp(expected) != 0 {
+		t.Fatalf("%s: got %x, want %x", operation, integer, expected)
+	}
+
+	if actual.isNegative() != byte(expected.Bit(0)) {
+		t.Fatalf("%s: incorrect sign bit", operation)
+	}
+}
+
+func fieldInteger(value fieldElement) *big.Int {
+	var encoded [32]byte
+
+	for index := range value {
+		binary.BigEndian.PutUint64(encoded[(3-index)*8:], value[index])
+	}
+
+	return new(big.Int).SetBytes(encoded[:])
+}

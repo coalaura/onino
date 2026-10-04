@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"filippo.io/edwards25519"
-	"filippo.io/edwards25519/field"
 
 	"github.com/coalaura/onino/internal/pattern"
 )
@@ -65,7 +64,7 @@ func BenchmarkBatchSizes(b *testing.B) {
 			state := testGenerator(b)
 
 			points := make([]extendedPoint, size)
-			products := make([]field.Element, size)
+			products := make([]fieldElement, size)
 			publicKeys := make([][32]byte, size)
 
 			for index := range points {
