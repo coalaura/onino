@@ -50,7 +50,7 @@ A full-width literal must respect the final symbol too. Interior literals can co
 
 ## Measurements
 
-Current [end-to-end measurements](../../measurements/PASS2.md) use PACE 1.27.1 on a Ryzen 9 9950X3D, one pinned Windows/amd64 worker and five alternating one-second samples. Against revision `adb389f`, full search with 512 anywhere patterns improved from 138.20 to 101.80 ns/key; 512 prefix patterns improved from 224.20 to 74.77 ns/key. These include generation and the production hit-handling loop, not matcher-only cost. Ordinary search remains allocation-free. Compiling 512 unanchored patterns increased from 0.37 to 0.61 ms because four anchor groups are built per pattern.
+Current end-to-end measurements use PACE 1.27.1 on a Ryzen 9 9950X3D, one pinned Windows/amd64 worker and five alternating one-second samples. Against revision `adb389f`, full search with 512 anywhere patterns improved from 138.20 to 101.80 ns/key; 512 prefix patterns improved from 224.20 to 74.77 ns/key. These include generation and the production hit-handling loop, not matcher-only cost. Ordinary search remains allocation-free. Compiling 512 unanchored patterns increased from 0.37 to 0.61 ms because four anchor groups are built per pattern.
 
 Small/medium sets keep the previous fast paths. A shared AVX2 register-table prefilter was slower in complete-search screens and was removed. Thresholds and first-hit versus miss costs depend on the pattern set, machine and compiler; the notes retain the measured tradeoffs.
 

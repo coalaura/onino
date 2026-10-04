@@ -74,8 +74,6 @@ Values are medians; all listed benchmarks report **0 B/op and 0 allocs/op**. Rar
 
 Generation/matching benchmarks omit hit handling. Full-search benchmarks use the production batch loop with statistics, immutable key snapshots, a cheap synchronous callback and independent reseeding after every hit; reproducible SHAKE entropy replaces OS random acquisition. Both exclude startup and context polling between batches. Filesystem persistence is measured separately and took about 2.6 ms per saved match on this machine, including validation and synchronized file writes. CLI throughput therefore depends strongly on the hit rate and storage.
 
-See [the second-pass notes](measurements/PASS2.md) for the full matrix, distributions, reproduction commands, ABI audit, PGO allocation diagnosis and rejected experiments; [first-pass notes](measurements/NOTES.md) retain earlier findings. Four anchors increase 512-pattern compilation from about 0.37 to 0.61 ms and retained dictionary storage from roughly 58 to at most 110 KiB. The affine-Y engine and two AVX2 arithmetic layouts did not earn integration. Batch-size optima and matcher crossover points vary by machine; these results are not compiler-independent throughput guarantees.
-
 On Windows, reproduce the pinned measurements and compare the recorded distributions with:
 
 ```powershell
