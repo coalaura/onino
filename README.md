@@ -11,7 +11,7 @@ pace build -o onino .
 ./onino --output matches 'hello.' 'onino.'
 ```
 
-On Windows, build with `pace build -o onino.exe .` and invoke `./onino.exe`. Stock `go build` is also supported. `builder build go` uses stock Go, so use PACE directly for the optimized binary.
+On Windows, build with `pace build -o onino.exe .` and invoke `./onino.exe`. Stock `go build` is also supported.
 
 The CLI uses `urfave/cli/v3`. Use `--help` for usage and `--output` / `-o` to select the destination directory; it defaults to `matches`.
 
