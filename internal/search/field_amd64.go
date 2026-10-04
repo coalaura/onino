@@ -19,6 +19,14 @@ func advanceBMI2(point *extendedPoint, scratch *[8]fieldElement, step *affineSte
 //go:abiinternal point=AX product=BX publicKey=CX count=DI reciprocal=SI ->
 func normalizeBMI2(point *extendedPoint, product *fieldElement, publicKey *[32]byte, count int, reciprocal *fieldElement)
 
+//go:noescape
+//go:abiinternal center=AX scratch=BX offset=CX ->
+func pairedPrepareBMI2(center *pairedAffine, scratch *pairedScratch, offset *pairedAffine)
+
+//go:noescape
+//go:abiinternal scratch=AX inverse=BX ->
+func pairedInverseBMI2(scratch *pairedScratch, inverse *fieldElement)
+
 func advanceBatch(points []extendedPoint, products []fieldElement) {
 	if !fastFieldAvailable {
 		advanceBatchGeneric(points, products)

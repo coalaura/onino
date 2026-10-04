@@ -30,6 +30,7 @@ type Matcher struct {
 	signFilter    *Matcher
 	signDependent bool
 	frequent      bool
+	independent   bool
 	dictionary    *tripletDictionary
 	anchors       *anchoredDictionary
 	ignoreSign    bool
@@ -66,6 +67,13 @@ type scanPlan struct {
 // The filter can be the receiver when none of its patterns inspect that bit.
 func (matcher *Matcher) SignFilter() *Matcher {
 	return matcher.signFilter
+}
+
+// PreferIndependent reports whether short patterns favor one independent seed
+// per candidate over paired generation. This is a compile-time performance hint,
+// not an estimate of the combined match probability.
+func (matcher *Matcher) PreferIndependent() bool {
+	return matcher.frequent || matcher.independent
 }
 
 // Match reports whether any compiled pattern matches data. It performs no

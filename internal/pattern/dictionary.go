@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	dictionaryThreshold = 128
+	dictionaryThreshold = 32
 	dictionaryStride    = 4
 )
 

@@ -15,3 +15,11 @@ func advanceBatch(points []extendedPoint, products []fieldElement) {
 func normalizeBMI2(point *extendedPoint, product *fieldElement, publicKey *[32]byte, count int, reciprocal *fieldElement) {
 	panic("unavailable")
 }
+
+func pairedPrepareBMI2(center *pairedAffine, scratch *pairedScratch, offset *pairedAffine) {
+	panic("unavailable")
+}
+
+func pairedInverseBMI2(scratch *pairedScratch, inverse *fieldElement) {
+	panic("unavailable")
+}

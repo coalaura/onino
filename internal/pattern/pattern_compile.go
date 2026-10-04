@@ -132,6 +132,8 @@ func (matcher *Matcher) addPattern(parsed parsedPattern, vector bool, ignoreSign
 		return true
 	}
 
+	matcher.independent = matcher.independent || len(parsed.literal) == 2
+
 	if len(parsed.literal) == 1 {
 		matcher.frequent = true
 		matcher.signDependent = true

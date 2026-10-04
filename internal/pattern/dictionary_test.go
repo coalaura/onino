@@ -15,6 +15,36 @@ type dictionaryBenchmarkCase struct {
 
 var dictionaryBenchmarkHit bool
 
+func TestDictionaryCrossover(t *testing.T) {
+	random := rand.New(rand.NewPCG(32, 128))
+	sizes := []int{31, 32, 33, 63, 64}
+
+	for _, size := range sizes {
+		background := dictionaryPatterns(size)
+
+		for range 40 {
+			data := randomInput(random)
+			encoded := testEncoding.EncodeToString(data[:])
+			alternatives := []string{encoded[7:17], encoded[:3] + ".", "." + encoded[49:], "." + encoded[12:14] + ".", encoded[:4] + "." + encoded[47:]}
+
+			for _, alternative := range alternatives {
+				patterns := append(slices.Clip(background), alternative)
+
+				matcher, err := CompilePatterns(patterns)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				checkDictionary(t, matcher, patterns, data)
+				data[31] ^= 128
+				checkDictionary(t, matcher, patterns, data)
+				data[31] ^= 128
+				checkDictionary(t, matcher, patterns, randomInput(random))
+			}
+		}
+	}
+}
+
 func TestDictionaryAlignments(t *testing.T) {
 	random := rand.New(rand.NewPCG(29, 255))
 	background := dictionaryPatterns(128)
@@ -243,6 +273,43 @@ func BenchmarkDictionaryMatch(b *testing.B) {
 				})
 			}
 		})
+	}
+}
+
+func BenchmarkCompileCrossover(b *testing.B) {
+	forms := []string{"ordinary", "shared", "short", "mixed"}
+	sizes := []int{16, 32, 64, 128}
+
+	for _, form := range forms {
+		for _, size := range sizes {
+			patterns := dictionaryPatterns(size)
+
+			if form == "shared" {
+				for index := range patterns {
+					patterns[index] = "aaa" + patterns[index][:7]
+				}
+			}
+
+			switch form {
+			case "short":
+				patterns = append(patterns, "xyz", ".bc.", "ab.")
+			case "mixed":
+				patterns = append(patterns, "zzzzzz.", ".qqqqqqqa", "abcd.wxyza")
+			}
+
+			b.Run(form+"/"+strconv.Itoa(size), func(b *testing.B) {
+				b.ReportAllocs()
+
+				for b.Loop() {
+					matcher, err := CompilePatterns(patterns)
+					if err != nil {
+						b.Fatal(err)
+					}
+
+					dictionaryBenchmarkHit = matcher.Match([32]byte{})
+				}
+			})
+		}
 	}
 }
 

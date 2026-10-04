@@ -3,6 +3,7 @@ package search
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha3"
 	"encoding/base32"
 	"encoding/binary"
 	"strconv"
@@ -153,9 +154,12 @@ func BenchmarkDictionarySearch(b *testing.B) {
 			}
 
 			b.Run(form+"/"+strconv.Itoa(size), func(b *testing.B) {
-				state := testGenerator(b)
-
 				matcher, err := pattern.CompilePatterns(patterns)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				state, err := newWorker(sha3.NewSHAKE256(), matcher)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -195,9 +199,12 @@ func BenchmarkFullSearch(b *testing.B) {
 
 	for _, test := range cases {
 		b.Run(test.name, func(b *testing.B) {
-			state := testGenerator(b)
-
 			matcher, err := pattern.CompilePatterns(test.patterns)
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			state, err := newWorker(sha3.NewSHAKE256(), matcher)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -226,6 +233,53 @@ func BenchmarkFullSearch(b *testing.B) {
 			b.ReportMetric(float64(stats.Checked)/b.Elapsed().Seconds(), "keys/s")
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(stats.Checked), "ns/key")
 		})
+	}
+}
+
+func BenchmarkCrossover(b *testing.B) {
+	forms := []string{"ordinary", "shared", "short", "mixed"}
+	sizes := []int{16, 32, 64, 128}
+
+	for _, form := range forms {
+		for _, size := range sizes {
+			patterns := benchmarkDictionary(size, form == "shared")
+
+			switch form {
+			case "short":
+				patterns = append(patterns, "xyz", ".bc.", "ab.")
+			case "mixed":
+				patterns = append(patterns, "zzzzzz.", ".qqqqqqqa", "abcd.wxyza")
+			}
+
+			b.Run(form+"/"+strconv.Itoa(size), func(b *testing.B) {
+				matcher, err := pattern.CompilePatterns(patterns)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				state, err := newWorker(sha3.NewSHAKE256(), matcher)
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				var stats Stats
+
+				b.ReportAllocs()
+
+				for b.Loop() {
+					err = state.searchBatch(matcher, benchmarkSave, &stats)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+
+				if stats.Checked != uint64(b.N)*batchSize {
+					b.Fatalf("lost candidates: %+v", stats)
+				}
+
+				b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(stats.Checked), "ns/key")
+			})
+		}
 	}
 }
 

@@ -65,9 +65,7 @@ func Run(ctx context.Context, matcher *pattern.Matcher, save SaveFunc) (Stats, e
 		return stats, err
 	}
 
-	state := generator{random: rand.Reader}
-
-	err = state.reset()
+	state, err := newWorker(rand.Reader, matcher)
 	if err != nil {
 		return stats, err
 	}
@@ -76,13 +74,6 @@ func Run(ctx context.Context, matcher *pattern.Matcher, save SaveFunc) (Stats, e
 		err = ctx.Err()
 		if err != nil {
 			return stats, err
-		}
-
-		if state.round == reseedRounds {
-			err = state.reset()
-			if err != nil {
-				return stats, err
-			}
 		}
 
 		err = state.searchBatch(matcher, save, &stats)
