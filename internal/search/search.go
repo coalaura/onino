@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
@@ -54,6 +55,12 @@ func (state *generator) searchBatch(matcher *pattern.Matcher, save SaveFunc, sta
 // candidate with matcher, and keeps searching after each successfully saved key.
 // Matching is over the public key's standalone 52-symbol base32 encoding.
 func Run(ctx context.Context, matcher *pattern.Matcher, save SaveFunc) (Stats, error) {
+	return RunWithProgress(ctx, matcher, save, nil)
+}
+
+// RunWithProgress is Run with an optional synchronous progress callback, called
+// about every four seconds at a batch boundary on the same search worker.
+func RunWithProgress(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, report func(Stats)) (Stats, error) {
 	var stats Stats
 
 	if matcher == nil || save == nil {
@@ -70,6 +77,12 @@ func Run(ctx context.Context, matcher *pattern.Matcher, save SaveFunc) (Stats, e
 		return stats, err
 	}
 
+	reporter := progressReporter{report: report}
+
+	if report != nil {
+		reporter.next = time.Now().Add(progressInterval)
+	}
+
 	for {
 		err = ctx.Err()
 		if err != nil {
@@ -80,5 +93,7 @@ func Run(ctx context.Context, matcher *pattern.Matcher, save SaveFunc) (Stats, e
 		if err != nil {
 			return stats, err
 		}
+
+		reporter.update(stats)
 	}
 }

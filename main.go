@@ -67,8 +67,29 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 	fmt.Fprintf(command.ErrWriter, "Searching with one worker; saving matches to %s. Press Ctrl+C to stop.\n", output)
 
 	started := time.Now()
+	lastReport := started
 
-	stats, err := search.Run(ctx, matcher, func(key onion.Key) error {
+	var (
+		lastChecked    uint64
+		progressBuffer [192]byte
+	)
+
+	progress := func(stats search.Stats) {
+		now := time.Now()
+		rate := float64(stats.Checked-lastChecked) / now.Sub(lastReport).Seconds()
+
+		lastReport = now
+		lastChecked = stats.Checked
+
+		// Reuse the line buffer so periodic reporting does not allocate.
+		elapsed := now.Sub(started).Truncate(time.Second)
+
+		line := appendSearchStatus(progressBuffer[:0], stats, elapsed, rate, false)
+
+		command.ErrWriter.Write(line)
+	}
+
+	stats, err := search.RunWithProgress(ctx, matcher, func(key onion.Key) error {
 		saveError := store.Save(key)
 		if saveError != nil {
 			return saveError
@@ -77,11 +98,14 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		fmt.Fprintln(command.Writer, key.Hostname())
 
 		return nil
-	})
+	}, progress)
 
 	elapsed := time.Since(started)
+	rate := float64(stats.Checked) / elapsed.Seconds()
 
-	fmt.Fprintf(command.ErrWriter, "Checked %d keys, saved %d matches in %s (%.0f keys/s).\n", stats.Checked, stats.Saved, elapsed.Round(time.Millisecond), float64(stats.Checked)/elapsed.Seconds())
+	line := appendSearchStatus(progressBuffer[:0], stats, elapsed.Round(time.Millisecond), rate, true)
+
+	command.ErrWriter.Write(line)
 
 	if errors.Is(err, context.Canceled) {
 		return nil

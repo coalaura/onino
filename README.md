@@ -19,7 +19,7 @@ Patterns are ORed together. Supported forms are `prefix.`, `.suffix`, `prefix.su
 
 Matching uses the **standalone lowercase, unpadded base32 encoding of the 32-byte public key**, excluding the checksum and version bytes. That representation has 52 symbols and ends in `a` or `q`. Its last symbol contains zero padding, whereas character 52 of the complete onion address also contains checksum bits; suffix patterns refer to the standalone key representation.
 
-The search continues until Ctrl+C or an error. Cancellation finishes the current batch of 512 checked candidates, including saving its matches. Successfully saved hostnames are printed to stdout; status and final counts go to stderr.
+The search continues until Ctrl+C or an error. Cancellation finishes the current batch of 512 checked candidates, including saving its matches. Successfully saved hostnames are printed to stdout. About every four seconds, a single line on stderr shows the total keys checked, total elapsed time and keys/second over the latest reporting interval, with comma-separated counts and rates; final counts are printed when the search stops.
 
 ## Saved matches
 
