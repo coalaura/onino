@@ -52,6 +52,8 @@ The ordinary search path performs no heap allocations. The CLI sets `GOMAXPROCS(
 
 ## Benchmarks
 
+### Current compiler comparison
+
 Stock Go and PACE Go 1.27.1, built from the same current source, on Windows 11/amd64 and an AMD Ryzen 9 9950X3D. Both use `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Values are medians from five alternating one-second runs per compiler; lower ns/key is better.
 
 | Workload | Go, ns/key | PACE, ns/key | PACE keys/second |
@@ -76,6 +78,14 @@ pace test -vet=off -pgo=off ./internal/search -run '^$' -bench '^Benchmark(FullS
 ```
 
 Run benchmarks serially with `GOMAXPROCS=1`, `GOAMD64=v1` and consistent CPU affinity. For compiler comparisons, build the same source with both toolchains and alternate their test binaries to reduce run-order bias.
+
+### Optimization history
+
+Sixteen cumulative milestones, rebuilt with the same PACE toolchain and measured with one full-search harness. Rare-prefix search went from **125.5 to 40.16 ns/key (3.13× throughput)**; a 512-pattern anywhere dictionary went from **348.3 to 69.58 ns/key (5.01×)**.
+
+![Full-search performance across sixteen milestones, from the first batched projective engine through paired affine generation and dedicated squaring.](docs/performance-history.svg)
+
+Each point is the median of five one-second samples on the same pinned worker; whiskers show the full range. The graph preserves plateaus and regressions and the separate workloads expose matcher improvements that a rare-prefix-only curve would miss.
 
 ## Verification
 
