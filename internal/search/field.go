@@ -56,6 +56,15 @@ func (result *fieldElement) multiply(left, right *fieldElement) {
 	}
 }
 
+//go:inline
+func (result *fieldElement) square(source *fieldElement) {
+	if fastFieldAvailable {
+		squareBMI2(result, source)
+	} else {
+		multiplyGeneric(result, source, source)
+	}
+}
+
 func (result *fieldElement) invert(source *fieldElement) {
 	// One inversion per batch: retain the established fixed addition chain,
 	// converting representations only at this cold boundary.

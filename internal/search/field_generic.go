@@ -8,6 +8,10 @@ func multiplyBMI2(result, left, right *fieldElement) {
 	multiplyGeneric(result, left, right)
 }
 
+func squareBMI2(result, source *fieldElement) {
+	multiplyGeneric(result, source, source)
+}
+
 func advanceBatch(points []extendedPoint, products []fieldElement) {
 	advanceBatchGeneric(points, products)
 }

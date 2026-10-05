@@ -56,17 +56,17 @@ Stock Go and PACE Go 1.27.1, built from the same current source, on Windows 11/a
 
 | Workload | Go, ns/key | PACE, ns/key | PACE keys/second |
 | --- | ---: | ---: | ---: |
-| Full search, rare prefix | 45.76 | 43.22 | 23.14 million |
-| Full search, frequent `ab.` | 54.95 | 52.39 | 19.09 million |
-| Full search, every candidate hits | 7666 | 7703 | 129,800 |
-| Full search, 512 anywhere patterns | 90.74 | 73.05 | 13.69 million |
-| Full search, 512 shared-triplet patterns | 85.11 | 67.89 | 14.73 million |
-| Full search, 512 prefixes | 47.93 | 45.52 | 21.97 million |
-| Full search, 512 suffixes | 47.91 | 45.53 | 21.96 million |
+| Full search, rare prefix | 42.99 | 40.88 | 24.46 million |
+| Full search, frequent `ab.` | 52.35 | 50.54 | 19.79 million |
+| Full search, every candidate hits | 7900 | 7800 | 128,200 |
+| Full search, 512 anywhere patterns | 88.57 | 70.66 | 14.15 million |
+| Full search, 512 shared-triplet patterns | 83.23 | 66.32 | 15.08 million |
+| Full search, 512 prefixes | 45.16 | 43.14 | 23.18 million |
+| Full search, 512 suffixes | 45.21 | 43.30 | 23.09 million |
 
-Both compilers report **0 B/op and 0 allocs/op** across all search samples. Rare-prefix samples ranged from 45.75-46.64 ns/key with Go and 43.20-44.41 with PACE. All-hit medians differ by less than 1%. These results describe one machine and use elapsed time on a pinned worker, rather than hardware-counter CPU accounting.
+Both compilers report **0 B/op and 0 allocs/op** across all search samples. Rare-prefix samples ranged from 42.86-43.03 ns/key with Go and 40.69-42.15 with PACE. All-hit medians differ by about 1.3%, with overlapping ranges. These results describe one machine and use elapsed time on a pinned worker, rather than hardware-counter CPU accounting.
 
-Full-search benchmarks include center transitions, matching, sign completion, statistics, discarded-candidate replenishment, immutable key snapshots and per-hit reseeding. They use reproducible SHAKE entropy and a cheap synchronous callback; startup, OS random acquisition, cancellation polling and disk persistence are outside the timed loop. Actual CLI throughput depends on hit rate and storage. With PACE, generation alone takes 41.89 ns/key for canonical Y or 65.68 ns/key for complete signed public keys.
+Full-search benchmarks include center transitions, matching, sign completion, statistics, discarded-candidate replenishment, immutable key snapshots and per-hit reseeding. They use reproducible SHAKE entropy and a cheap synchronous callback; startup, OS random acquisition, cancellation polling and disk persistence are outside the timed loop. Actual CLI throughput depends on hit rate and storage. With PACE, generation alone takes 38.73 ns/key for canonical Y or 62.52 ns/key for complete signed public keys.
 
 To benchmark the production search loop:
 

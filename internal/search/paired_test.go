@@ -8,6 +8,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"math/big"
+	"math/rand/v2"
 	"testing"
 
 	"filippo.io/edwards25519"
@@ -65,6 +67,63 @@ func TestPairedFormula(t *testing.T) {
 					t.Fatalf("pair formula: center %d offset %d side %d", index, position+1, side)
 				}
 			}
+		}
+	}
+}
+
+func TestPairedReciprocals(t *testing.T) {
+	prime := new(big.Int).Lsh(big.NewInt(1), 255)
+	prime.Sub(prime, big.NewInt(19))
+
+	values := []fieldElement{
+		{},
+		{2, 0, 0, 0},
+		{0xffffffffffffffff, 0, 0, 0},
+		{0, 0, 0, 0x8000000000000000},
+		{0xffffffffffffffed, 0xffffffffffffffff, 0xffffffffffffffff, 0x7fffffffffffffff},
+		{0xffffffffffffffda, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff},
+		{0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff},
+	}
+
+	state := new(pairedGenerator)
+
+	offset := pairedAffine{xy: pairedOne}
+
+	random := rand.New(rand.NewPCG(37, 91))
+
+	for round := range 8 {
+		for index := range state.centers {
+			value := fieldElement{random.Uint64(), random.Uint64(), random.Uint64(), random.Uint64()}
+
+			if round == 0 && index < len(values) {
+				value = values[index]
+			}
+
+			state.centers[index].xy = value
+		}
+
+		state.prepare(&offset)
+
+		for index := range state.centers {
+			coupling := fieldInteger(state.centers[index].xy)
+
+			denominator := new(big.Int).Sub(big.NewInt(1), coupling)
+
+			expected := new(big.Int).ModInverse(denominator, prime)
+			if expected == nil {
+				t.Fatal("unexpected zero denominator")
+			}
+
+			checkFieldResult(t, "plus reciprocal", &state.scratch[index].plusInverse, expected)
+
+			denominator.Add(big.NewInt(1), coupling)
+
+			expected = expected.ModInverse(denominator, prime)
+			if expected == nil {
+				t.Fatal("unexpected zero denominator")
+			}
+
+			checkFieldResult(t, "minus reciprocal", &state.scratch[index].minusInverse, expected)
 		}
 	}
 }

@@ -12,6 +12,10 @@ func supportsBMI2ADX() bool
 func multiplyBMI2(result, left, right *fieldElement)
 
 //go:noescape
+//go:abiinternal result=AX source=BX ->
+func squareBMI2(result, source *fieldElement)
+
+//go:noescape
 //go:abiinternal point=AX scratch=BX step=CX ->
 func advanceBMI2(point *extendedPoint, scratch *[8]fieldElement, step *affineStep)
 

@@ -63,6 +63,10 @@
 	ADOXQ DI, SI; \
 	MOVQ $0, AX; \
 	ADCXQ AX, SI; \
+	REDUCE(DO)
+
+// R8..R11 hold the low half, R12/R13/R15/SI the high half.
+#define REDUCE(DO) \
 	MOVQ $38, DX; \
 	XORL CX, CX; \
 	MULXQ R12, AX, DI; \
@@ -91,6 +95,57 @@
 	MOVQ R9, DO+8(AX); \
 	MOVQ R10, DO+16(AX); \
 	MOVQ R11, DO+24(AX)
+
+// Six cross-products are accumulated once and doubled before adding the four
+// diagonal products. All 256 input bits are supported; consume them before
+// storing so the output may alias the input.
+#define SQUARE(LO, DO) \
+	MOVQ AX, X0; \
+	MOVQ LO+0(BX), DX; \
+	MULXQ LO+8(BX), R9, R10; \
+	MULXQ LO+16(BX), AX, R11; \
+	ADDQ AX, R10; \
+	MULXQ LO+24(BX), AX, R12; \
+	ADCQ AX, R11; \
+	ADCQ $0, R12; \
+	XORL R13, R13; \
+	MOVQ LO+8(BX), DX; \
+	MULXQ LO+16(BX), AX, DI; \
+	ADCXQ AX, R11; \
+	ADOXQ DI, R12; \
+	MULXQ LO+24(BX), AX, DI; \
+	ADCXQ AX, R12; \
+	ADOXQ DI, R13; \
+	MOVQ $0, AX; \
+	ADCXQ AX, R13; \
+	MOVQ LO+16(BX), DX; \
+	MULXQ LO+24(BX), AX, R15; \
+	ADDQ AX, R13; \
+	ADCQ $0, R15; \
+	XORL SI, SI; \
+	ADDQ R9, R9; \
+	ADCQ R10, R10; \
+	ADCQ R11, R11; \
+	ADCQ R12, R12; \
+	ADCQ R13, R13; \
+	ADCQ R15, R15; \
+	ADCQ $0, SI; \
+	MOVQ LO+0(BX), DX; \
+	MULXQ DX, R8, DI; \
+	ADDQ DI, R9; \
+	MOVQ LO+8(BX), DX; \
+	MULXQ DX, AX, DI; \
+	ADCQ AX, R10; \
+	ADCQ DI, R11; \
+	MOVQ LO+16(BX), DX; \
+	MULXQ DX, AX, DI; \
+	ADCQ AX, R12; \
+	ADCQ DI, R13; \
+	MOVQ LO+24(BX), DX; \
+	MULXQ DX, AX, DI; \
+	ADCQ AX, R15; \
+	ADCQ DI, SI; \
+	REDUCE(DO)
 
 #define LOAD(L, LO, R, RO) \
 	MOVQ L, BX; \
@@ -146,3 +201,8 @@
 	MOVQ R, CX; \
 	MOVQ D, AX; \
 	PRODUCT(LO, RO, DO)
+
+#define SQR(L, LO, D, DO) \
+	MOVQ L, BX; \
+	MOVQ D, AX; \
+	SQUARE(LO, DO)

@@ -28,3 +28,9 @@ TEXT ·multiplyBMI2(SB), NOSPLIT, $0-24
 	MOVQ right+16(FP), CX
 	PRODUCT(0, 0, 0)
 	RET
+
+TEXT ·squareBMI2(SB), NOSPLIT, $0-16
+	MOVQ result+0(FP), AX
+	MOVQ source+8(FP), BX
+	SQUARE(0, 0)
+	RET

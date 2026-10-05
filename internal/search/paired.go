@@ -174,7 +174,7 @@ func (state *pairedGenerator) prepare(offset *pairedAffine) {
 		scratch.b.multiply(&center.y, &offset.y)
 		scratch.c.multiply(&center.xy, &offset.xy)
 
-		scratch.denominator.multiply(&scratch.c, &scratch.c)
+		scratch.denominator.square(&scratch.c)
 		scratch.denominator.subtract(&pairedOne, &scratch.denominator)
 
 		if index == 0 {
@@ -204,10 +204,9 @@ func (state *pairedGenerator) prepare(offset *pairedAffine) {
 			inverse.multiply(&inverse, &scratch.denominator)
 		}
 
-		factor.add(&pairedOne, &scratch.c)
-		scratch.plusInverse.multiply(&reciprocal, &factor)
-		factor.subtract(&pairedOne, &scratch.c)
-		scratch.minusInverse.multiply(&reciprocal, &factor)
+		factor.multiply(&scratch.c, &reciprocal)
+		scratch.plusInverse.add(&reciprocal, &factor)
+		scratch.minusInverse.subtract(&reciprocal, &factor)
 	}
 }
 

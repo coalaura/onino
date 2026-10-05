@@ -21,7 +21,7 @@ paired_prepare_loop:
 	MUL(X1, 0, X3, 0, X2, 0)
 	MUL(X1, 32, X3, 32, X2, 32)
 	MUL(X1, 64, X3, 64, X2, 64)
-	MUL(X2, 64, X2, 64, X2, 96)
+	SQR(X2, 64, X2, 96)
 	SUBTRACT(X5, 0, X2, 96, X2, 96)
 	MOVQ X4, DI
 	CMPQ DI, $256
@@ -57,8 +57,6 @@ TEXT ·pairedInverseBMI2(SB), NOSPLIT, $0-16
 	MOVQ inverse+8(FP), BX
 	MOVQ AX, X1
 	MOVQ BX, X2
-	LEAQ ·pairedOne(SB), CX
-	MOVQ CX, X3
 	MOVQ $256, DI
 	MOVQ DI, X4
 paired_inverse_loop:
@@ -76,10 +74,10 @@ paired_inverse_first:
 	MOVOU X6, 128(BX)
 	MOVOU X7, 144(BX)
 paired_inverse_factors:
-	ADD(X3, 0, X1, 64, X1, 96)
-	MUL(X1, 128, X1, 96, X1, 160)
-	SUBTRACT(X3, 0, X1, 64, X1, 96)
-	MUL(X1, 128, X1, 96, X1, 192)
+	// Reuse the expired denominator for c*r; reconstruct r +/- c*r.
+	MUL(X1, 64, X1, 128, X1, 96)
+	ADD(X1, 128, X1, 96, X1, 160)
+	SUBTRACT(X1, 128, X1, 96, X1, 192)
 	MOVQ X4, DI
 	DECQ DI
 	JZ paired_inverse_done

@@ -124,6 +124,15 @@ func checkFieldArithmetic(t *testing.T, left, right fieldElement) {
 
 	checkFieldResult(t, "in-place square", &result, expected)
 
+	result.square(&left)
+
+	checkFieldResult(t, "dedicated square", &result, expected)
+
+	result = left
+	result.square(&result)
+
+	checkFieldResult(t, "dedicated in-place square", &result, expected)
+
 	result.invert(&left)
 
 	expected.ModInverse(leftInteger, prime)
