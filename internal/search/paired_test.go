@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha3"
-	"encoding/base32"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -129,11 +128,7 @@ func TestPairedReciprocals(t *testing.T) {
 }
 
 func TestRunPairedCancellation(t *testing.T) {
-	patterns := make([]string, 0, 64)
-
-	for _, symbol := range "abcdefghijklmnopqrstuvwxyz234567" {
-		patterns = append(patterns, "."+string(symbol)+"a", "."+string(symbol)+"q")
-	}
+	patterns := allSuffixPatterns(2)
 
 	matcher, err := pattern.CompilePatterns(patterns)
 	if err != nil {
@@ -262,7 +257,7 @@ func TestPairedBoundaryScalars(t *testing.T) {
 func TestPairedHitInvalidation(t *testing.T) {
 	state := testPairedGenerator(t)
 
-	matcher, err := pattern.CompilePatterns([]string{".a", ".q"})
+	matcher, err := pattern.CompilePatterns(allSuffixPatterns(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,8 +320,6 @@ func TestPairedAllocations(t *testing.T) {
 }
 
 func TestPairedPendingSides(t *testing.T) {
-	encoding := base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPadding(base32.NoPadding)
-
 	for side := range 3 {
 		state := testPairedGenerator(t)
 
@@ -345,7 +338,9 @@ func TestPairedPendingSides(t *testing.T) {
 			patternKey[31] ^= 128
 		}
 
-		matcher, compileErr := pattern.CompilePatterns([]string{encoding.EncodeToString(patternKey[:]) + "."})
+		patternAddress := onion.Key{Public: patternKey}
+
+		matcher, compileErr := pattern.CompilePatterns([]string{patternAddress.Hostname()[:52] + "."})
 		if compileErr != nil {
 			t.Fatal(compileErr)
 		}
@@ -392,7 +387,7 @@ func TestPairedErrors(t *testing.T) {
 		t.Fatalf("paired reset: %v", err)
 	}
 
-	matcher, err := pattern.CompilePatterns([]string{".a", ".q"})
+	matcher, err := pattern.CompilePatterns(allSuffixPatterns(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +481,7 @@ func BenchmarkPaired(b *testing.B) {
 	cases := []benchmarkCase{
 		{name: "rare", patterns: []string{"somethingrare."}},
 		{name: "frequent", patterns: []string{"ab."}},
-		{name: "all_hits", patterns: []string{".a", ".q"}},
+		{name: "all_hits", patterns: allSuffixPatterns(1)},
 		{name: "512", patterns: benchmarkDictionary(512, false)},
 		{name: "shared512", patterns: benchmarkDictionary(512, true)},
 	}
@@ -524,7 +519,10 @@ func BenchmarkEngineCrossover(b *testing.B) {
 	cases := []benchmarkCase{
 		{name: "prefix1", patterns: []string{"a."}},
 		{name: "prefix2", patterns: []string{"ab."}},
+		{name: "suffix1", patterns: []string{".a"}},
 		{name: "suffix2", patterns: []string{".aa"}},
+		{name: "suffix3", patterns: []string{".aaa"}},
+		{name: "suffix4", patterns: []string{".aaaa"}},
 		{name: "anywhere2", patterns: []string{"bc"}},
 		{name: "anywhere3", patterns: []string{"abc"}},
 		{name: "interior2", patterns: []string{".bc."}},

@@ -14,21 +14,28 @@ type probabilityCase struct {
 }
 
 func TestEstimateProbability(t *testing.T) {
-	full := strings.Repeat("a", 52)
+	full := visibleEncoding(make([]byte, 32))
+	suffixes := make([]string, 0, 32)
+
+	for _, symbol := range testAlphabet {
+		suffixes = append(suffixes, "."+string(symbol))
+	}
 
 	cases := []probabilityCase{
 		{name: "empty", want: 0},
 		{name: "prefix", patterns: []string{"example."}, want: math.Ldexp(1, -35)},
-		{name: "suffix padding", patterns: []string{".examplea"}, want: math.Ldexp(1, -36)},
-		{name: "combined", patterns: []string{"example.a"}, want: math.Ldexp(1, -36)},
+		{name: "visible suffix", patterns: []string{".examplea"}, want: math.Ldexp(1, -40)},
+		{name: "combined", patterns: []string{"example.a"}, want: math.Ldexp(1, -40)},
+		{name: "short suffix", patterns: []string{".b"}, want: 1.0 / 32},
+		{name: "checksum alternatives", patterns: []string{".a", ".b"}, want: 2.0 / 32},
 		{name: "overlapping anchors", patterns: []string{full + "." + full}, want: math.Ldexp(1, -256)},
 		{name: "duplicates and containment", patterns: []string{"abc.", "abc.", "abcd."}, want: math.Ldexp(1, -15)},
 		{name: "disjoint", patterns: []string{"a.", "b."}, want: 2.0 / 32},
-		{name: "intersecting", patterns: []string{"a.", ".a"}, want: 1.0/32 + 0.5 - 1.0/64},
-		{name: "all hit", patterns: []string{".a", ".q"}, want: 1},
+		{name: "intersecting", patterns: []string{"a.", ".a"}, want: 2.0/32 - 1.0/1024},
+		{name: "all hit", patterns: suffixes, want: 1},
 		{name: "interior", patterns: []string{".x."}, want: 1 - math.Pow(31.0/32, 50)},
-		{name: "anywhere", patterns: []string{"x"}, want: 1 - math.Pow(31.0/32, 51)},
-		{name: "anywhere padding", patterns: []string{"a"}, want: 1 - 0.5*math.Pow(31.0/32, 51)},
+		{name: "anywhere", patterns: []string{"x"}, want: 1 - math.Pow(31.0/32, 52)},
+		{name: "anywhere a", patterns: []string{"a"}, want: 1 - math.Pow(31.0/32, 52)},
 		{name: "self overlapping literal", patterns: []string{"aa"}, want: repeatedSymbolProbability()},
 	}
 
@@ -45,7 +52,7 @@ func TestEstimateProbability(t *testing.T) {
 		})
 	}
 
-	invalid := []string{"", "EXAMPLE.", ".end", strings.Repeat("a", 53), "." + strings.Repeat("a", 51) + "."}
+	invalid := []string{"", "EXAMPLE.", "a..b", strings.Repeat("a", 53), "." + strings.Repeat("a", 51) + "."}
 
 	for _, text := range invalid {
 		_, err := EstimateProbability([]string{text})
@@ -58,18 +65,20 @@ func TestEstimateProbability(t *testing.T) {
 func TestProbabilityDiagramExhaustive(t *testing.T) {
 	random := rand.New(rand.NewPCG(17, 29))
 
-	conditions := make([]bitPattern, 12)
+	conditions := make([]probabilityCondition, 12)
 
 	for range 30 {
 		for index := range conditions {
-			mask := random.Uint64() & 1023
-			conditions[index] = bitPattern{mask: [4]uint64{mask}, value: [4]uint64{random.Uint64() & mask}}
+			mask := random.Uint64() & 63
+			checksumMask := random.Uint64() & 15
+
+			conditions[index] = probabilityCondition{mask: [5]uint64{mask, 0, 0, 0, checksumMask}, value: [5]uint64{random.Uint64() & mask, 0, 0, 0, random.Uint64() & checksumMask}}
 		}
 
 		matches := 0
 
 		for value := range uint64(1024) {
-			input := [4]uint64{value}
+			input := [5]uint64{value & 63, 0, 0, 0, value >> 6}
 
 			for index := range conditions {
 				if conditions[index].matches(&input) {
@@ -101,7 +110,7 @@ func TestProbabilitySampling(t *testing.T) {
 	}
 
 	got := sampleProbability(conditions)
-	want := 3.0 / 64
+	want := 1.0/32 + 1.0/1024
 
 	if math.Abs(got-want) > want*0.03 {
 		t.Fatalf("weighted estimate = %g, want approximately %g", got, want)
@@ -149,12 +158,8 @@ func repeatedSymbolProbability() float64 {
 		matched float64
 	)
 
-	for position := range encodedSize {
+	for range encodedSize {
 		chanceA := 1.0 / 32
-
-		if position == encodedSize-1 {
-			chanceA = 0.5
-		}
 
 		matched += endingA * chanceA
 		nextEndingA := notEndingA * chanceA

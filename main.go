@@ -33,7 +33,7 @@ func newCommand() *cli.Command {
 		Name:        "onino",
 		Usage:       "Continuously search for vanity v3 onion addresses",
 		ArgsUsage:   "pattern [pattern ...]",
-		Description: "Patterns match the 32-byte public key encoded as lowercase base32.\nForms: prefix.  .suffix  prefix.suffix  .interior.  anywhere",
+		Description: "Patterns match the first 52 visible lowercase base32 characters of the onion hostname.\nSuffixes end at character 52, before the final four checksum/version characters.\nForms: prefix.  .suffix  prefix.suffix  .interior.  anywhere",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:  "cpu",

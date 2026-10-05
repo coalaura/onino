@@ -12,7 +12,7 @@ func TestSignFilter(t *testing.T) {
 		data := randomInput(random)
 		data[31] = data[31]&0x7f | byte(sample%2)<<7
 
-		encoded := testEncoding.EncodeToString(data[:])
+		encoded := visibleEncoding(data[:])
 
 		patterns := []string{
 			encoded[:49] + ".",
@@ -45,7 +45,7 @@ func FuzzSignFilter(f *testing.F) {
 		}
 
 		data := [32]byte(input)
-		encoded := testEncoding.EncodeToString(data[:])
+		encoded := visibleEncoding(data[:])
 
 		start := int(first) % 51
 		end := start + 2 + int(last)%(51-start)
@@ -76,10 +76,7 @@ func checkSignFilter(t *testing.T, patterns []string, data [32]byte) {
 			partial := changed
 			partial[31] &= 0x7f
 
-			opposite := partial
-			opposite[31] |= 0x80
-
-			want := matcher.Match(partial) || matcher.Match(opposite)
+			want := referenceFilter(patterns, partial)
 			if filter.Match(partial) != want {
 				t.Fatalf("filter differs from union of signs: %q, %x", patterns, changed)
 			}

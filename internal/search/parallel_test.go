@@ -21,7 +21,7 @@ type searchResult struct {
 }
 
 func TestParallelHits(t *testing.T) {
-	matcher := parallelMatcher(t, ".a", ".q")
+	matcher := parallelMatcher(t, allSuffixPatterns(1)...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -85,7 +85,7 @@ func TestParallelHits(t *testing.T) {
 }
 
 func TestParallelSaveFailure(t *testing.T) {
-	matcher := parallelMatcher(t, ".a", ".q")
+	matcher := parallelMatcher(t, allSuffixPatterns(1)...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -127,7 +127,7 @@ func TestParallelPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	matcher := parallelMatcher(t, ".a", ".q")
+	matcher := parallelMatcher(t, allSuffixPatterns(1)...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -190,7 +190,7 @@ func TestParallelStartupAndCleanup(t *testing.T) {
 }
 
 func TestParallelReseedFailure(t *testing.T) {
-	matcher := parallelMatcher(t, ".a", ".q")
+	matcher := parallelMatcher(t, allSuffixPatterns(1)...)
 	hooks := testParallelHooks()
 
 	hooks.create = func(index int, matcher *pattern.Matcher) (*worker, error) {
@@ -218,7 +218,7 @@ func TestParallelReseedFailure(t *testing.T) {
 }
 
 func TestParallelBlockedSave(t *testing.T) {
-	matcher := parallelMatcher(t, ".a", ".q")
+	matcher := parallelMatcher(t, allSuffixPatterns(1)...)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -325,7 +325,7 @@ func TestParallelOptions(t *testing.T) {
 }
 
 func TestParallelHitPathAllocations(t *testing.T) {
-	matcher := parallelMatcher(t, ".a", ".q")
+	matcher := parallelMatcher(t, allSuffixPatterns(1)...)
 
 	state, err := deterministicWorker(0, matcher)
 	if err != nil {

@@ -1,6 +1,7 @@
 package pattern
 
 import (
+	"crypto/sha3"
 	"encoding/base32"
 	"math/rand/v2"
 	"strings"
@@ -22,9 +23,9 @@ var testEncoding = base32.NewEncoding(testAlphabet).WithPadding(base32.NoPadding
 func TestPatternSemantics(t *testing.T) {
 	data := randomInput(rand.New(rand.NewPCG(1, 2)))
 
-	encoded := testEncoding.EncodeToString(data[:])
+	encoded := visibleEncoding(data[:])
 
-	allA := strings.Repeat("a", encodedSize)
+	zeroText := visibleEncoding(make([]byte, 32))
 
 	cases := []patternTestCase{
 		{name: "empty list", data: data},
@@ -47,7 +48,7 @@ func TestPatternSemantics(t *testing.T) {
 		{name: "disjunction", patterns: []string{"zzzzzzzz.", encoded[5:17], "yyyyyyyy."}, data: data, want: true},
 		{name: "duplicates", patterns: []string{encoded, encoded}, data: data, want: true},
 		{name: "no match", patterns: []string{"zzzzzzzz.", "yyyyyyyy", ".xxxxxq"}, data: data},
-		{name: "zero full", patterns: []string{allA}, want: true},
+		{name: "zero full", patterns: []string{zeroText}, want: true},
 	}
 
 	for _, test := range cases {
@@ -67,7 +68,7 @@ func TestInvalidPatterns(t *testing.T) {
 	patterns := []string{
 		"", ".", "..", "...", ".a.b", "a.b.", "a..b", "a.b.c", ".a.b.",
 		"A", "0", "1", "8", "9", "=", "a b", "a\x00b", "é", "😀",
-		".b", ".finish", "start.end", strings.Repeat("a", 51) + "b",
+		strings.Repeat("a", 51) + "b",
 		strings.Repeat("a", 53), strings.Repeat("a", 53) + ".", "." + strings.Repeat("a", 53),
 		"." + strings.Repeat("a", 51) + ".",
 		strings.Repeat("a", 40) + "." + strings.Repeat("b", 20) + "a",
@@ -88,7 +89,7 @@ func TestAllBitAlignments(t *testing.T) {
 		for position := 0; position+length <= encodedSize; position++ {
 			data := randomInput(random)
 
-			encoded := testEncoding.EncodeToString(data[:])
+			encoded := visibleEncoding(data[:])
 
 			literal := encoded[position : position+length]
 
@@ -103,7 +104,7 @@ func TestAllBitAlignments(t *testing.T) {
 
 				changed[random.IntN(len(changed))] ^= byte(1 << random.IntN(8))
 
-				changedEncoding := testEncoding.EncodeToString(changed[:])
+				changedEncoding := visibleEncoding(changed[:])
 
 				want := strings.Contains(changedEncoding, literal)
 
@@ -118,7 +119,7 @@ func TestFinalCharacter(t *testing.T) {
 		var data [32]byte
 
 		data[31] = byte(value)
-		encoded := testEncoding.EncodeToString(data[:])
+		encoded := visibleEncoding(data[:])
 
 		for _, character := range testAlphabet {
 			literal := string(character)
@@ -126,16 +127,7 @@ func TestFinalCharacter(t *testing.T) {
 			checkImplementations(t, []string{literal}, data, strings.Contains(encoded, literal))
 			checkImplementations(t, []string{"." + literal + "."}, data, strings.Contains(encoded[1:51], literal))
 
-			if character == 'a' || character == 'q' {
-				checkImplementations(t, []string{"." + literal}, data, strings.HasSuffix(encoded, literal))
-
-				continue
-			}
-
-			_, err := CompilePatterns([]string{"." + literal})
-			if err == nil {
-				t.Fatalf("impossible suffix %q accepted", literal)
-			}
+			checkImplementations(t, []string{"." + literal}, data, strings.HasSuffix(encoded, literal))
 		}
 	}
 }
@@ -146,7 +138,7 @@ func TestRandomizedAgainstBase32(t *testing.T) {
 	for iteration := range 200 {
 		seed := randomInput(random)
 
-		encoded := testEncoding.EncodeToString(seed[:])
+		encoded := visibleEncoding(seed[:])
 
 		patterns := make([]string, 0, 16)
 
@@ -181,7 +173,7 @@ func TestRandomizedAgainstBase32(t *testing.T) {
 				data = randomInput(random)
 			}
 
-			text := testEncoding.EncodeToString(data[:])
+			text := visibleEncoding(data[:])
 			want := referenceMatch(patterns, text)
 
 			for _, matcher := range compiled {
@@ -221,7 +213,7 @@ func TestSingleCharacterPositions(t *testing.T) {
 			}
 
 			data := [32]byte(decoded)
-			checkImplementations(t, []string{string(character)}, data, true)
+			checkImplementations(t, []string{string(character)}, data, strings.Contains(visibleEncoding(data[:]), string(character)))
 			checkImplementations(t, []string{"." + string(character) + "."}, data, position > 0 && position < encodedSize-1)
 		}
 	}
@@ -266,7 +258,7 @@ func TestMatcherConcurrent(t *testing.T) {
 
 	for index := range inputs {
 		inputs[index] = randomInput(random)
-		expected[index] = referenceMatch(patterns, testEncoding.EncodeToString(inputs[index][:]))
+		expected[index] = referenceMatch(patterns, visibleEncoding(inputs[index][:]))
 	}
 
 	var workers sync.WaitGroup
@@ -319,7 +311,7 @@ func FuzzMatcher(fuzz *testing.F) {
 		}
 
 		data := [32]byte(input)
-		encoded := testEncoding.EncodeToString(data[:])
+		encoded := visibleEncoding(data[:])
 
 		want := referenceMatch([]string{pattern}, encoded)
 		if matcher.Match(data) != want {
@@ -357,7 +349,7 @@ func checkImplementations(t *testing.T, patterns []string, data [32]byte, want b
 
 	for _, matcher := range compileImplementations(t, patterns) {
 		if matcher.Match(data) != want {
-			t.Fatalf("%q against %q: want %v (vector %v)", patterns, testEncoding.EncodeToString(data[:]), want, len(matcher.scans) != 0)
+			t.Fatalf("%q against %q: want %v (vector %v)", patterns, visibleEncoding(data[:]), want, len(matcher.scans) != 0)
 		}
 	}
 }
@@ -370,6 +362,35 @@ func randomInput(random *rand.Rand) [32]byte {
 	}
 
 	return data
+}
+
+func visibleEncoding(data []byte) string {
+	input := append([]byte(".onion checksum"), data...)
+	input = append(input, 3)
+
+	checksum := sha3.Sum256(input)
+
+	address := append([]byte(nil), data...)
+	address = append(address, checksum[0], checksum[1], 3)
+
+	return testEncoding.EncodeToString(address)[:encodedSize]
+}
+
+func referenceFilter(patterns []string, data [32]byte) bool {
+	for sign := range byte(2) {
+		data[31] = data[31]&0x7f | sign<<7
+		text := []byte(testEncoding.EncodeToString(data[:]))
+
+		for nibble := range byte(16) {
+			text[51] = testAlphabet[(data[31]&1)<<4|nibble]
+
+			if referenceMatch(patterns, string(text)) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func referenceMatch(patterns []string, encoded string) bool {

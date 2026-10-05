@@ -9,10 +9,21 @@ import (
 	"testing"
 )
 
-var benchmarkHostname string
+var (
+	benchmarkHostname string
+	benchmarkChecksum [2]byte
+)
 
 func BenchmarkHitCosts(b *testing.B) {
 	key := testKey()
+
+	b.Run("checksum", func(b *testing.B) {
+		b.ReportAllocs()
+
+		for b.Loop() {
+			benchmarkChecksum = Checksum(&key.Public)
+		}
+	})
 
 	b.Run("validate", func(b *testing.B) {
 		b.ReportAllocs()

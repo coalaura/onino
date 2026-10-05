@@ -13,11 +13,13 @@ const (
 	matcherGeneral
 	matcherDictionary
 	matcherAnchors
+	matcherBoundary
+	matcherSuffix
 )
 
 // Matcher is an immutable, concurrency-safe OR of compiled patterns. Its zero
-// value matches nothing. Input is interpreted as lowercase, unpadded RFC 4648
-// base32, without constructing the encoded string.
+// value matches nothing. Patterns match the first 52 visible hostname characters,
+// including the four checksum bits in character 52, without base32 encoding.
 type Matcher struct {
 	single        wordProbe
 	kind          uint8
@@ -34,6 +36,7 @@ type Matcher struct {
 	dictionary    *tripletDictionary
 	anchors       *anchoredDictionary
 	ignoreSign    bool
+	boundary      *boundaryMatcher
 }
 
 type wordProbe struct {
@@ -61,9 +64,9 @@ type scanPlan struct {
 	value     uint32
 }
 
-// SignFilter returns a necessary-condition matcher that ignores only byte 31
-// bit 7, or nil when eagerly completing the sign is preferable. A surviving
-// candidate must have its real sign completed and pass Match before acceptance.
+// SignFilter returns a necessary-condition matcher that ignores byte 31 bit 7
+// and checksum constraints, or nil when eager sign completion is preferable.
+// A survivor must have its real sign completed and pass Match before acceptance.
 // The filter can be the receiver when none of its patterns inspect that bit.
 func (matcher *Matcher) SignFilter() *Matcher {
 	return matcher.signFilter
@@ -99,6 +102,10 @@ func (matcher *Matcher) Match(data [32]byte) bool {
 		return matcher.dictionary.match(&data, matcher.ignoreSign)
 	case matcherAnchors:
 		return matcher.anchors.match(&data, matcher.ignoreSign)
+	case matcherBoundary:
+		return matcher.boundary.match(&data)
+	case matcherSuffix:
+		return matcher.boundary.matchSuffix(&data)
 	}
 
 	return matcher.matchGeneral(&data)

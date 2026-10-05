@@ -53,7 +53,7 @@ func (state *generator) searchBatch(matcher *pattern.Matcher, save SaveFunc, sta
 
 // Run searches until cancellation or an error. It uses one worker, checks every
 // candidate with matcher, and keeps searching after each successfully saved key.
-// Matching is over the public key's standalone 52-symbol base32 encoding.
+// Matching is over the first 52 visible characters of the onion hostname.
 func Run(ctx context.Context, matcher *pattern.Matcher, save SaveFunc) (Stats, error) {
 	return RunWithProgress(ctx, matcher, save, nil)
 }

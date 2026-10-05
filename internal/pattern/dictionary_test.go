@@ -24,7 +24,8 @@ func TestDictionaryCrossover(t *testing.T) {
 
 		for range 40 {
 			data := randomInput(random)
-			encoded := testEncoding.EncodeToString(data[:])
+			encoded := visibleEncoding(data[:])
+
 			alternatives := []string{encoded[7:17], encoded[:3] + ".", "." + encoded[49:], "." + encoded[12:14] + ".", encoded[:4] + "." + encoded[47:]}
 
 			for _, alternative := range alternatives {
@@ -53,8 +54,9 @@ func TestDictionaryAlignments(t *testing.T) {
 	for _, length := range lengths {
 		for start := 0; start+length <= encodedSize; start++ {
 			data := randomInput(random)
-			encoded := testEncoding.EncodeToString(data[:])
+			encoded := visibleEncoding(data[:])
 			literal := encoded[start : start+length]
+
 			forms := []string{literal, encoded[:start+length] + ".", "." + encoded[start:], encoded[:start+length] + "." + encoded[start:]}
 
 			if start > 0 && start+length < encodedSize {
@@ -86,7 +88,7 @@ func TestDictionaryDifferential(t *testing.T) {
 	for range 100 {
 		data := randomInput(random)
 
-		encoded := testEncoding.EncodeToString(data[:])
+		encoded := visibleEncoding(data[:])
 
 		additional := []string{
 			encoded[:49] + ".",
@@ -201,7 +203,7 @@ func FuzzDictionary(f *testing.F) {
 		}
 
 		data := [32]byte(input)
-		encoded := testEncoding.EncodeToString(data[:])
+		encoded := visibleEncoding(data[:])
 
 		position := int(start) % 50
 		literal := encoded[position:]
@@ -355,7 +357,7 @@ func BenchmarkCompileCrossover(b *testing.B) {
 func checkDictionary(t *testing.T, matcher *Matcher, patterns []string, data [32]byte) {
 	t.Helper()
 
-	text := testEncoding.EncodeToString(data[:])
+	text := visibleEncoding(data[:])
 	if matcher.Match(data) != referenceMatch(patterns, text) {
 		t.Fatalf("dictionary differs from base32 reference on %x", data)
 	}
@@ -366,10 +368,8 @@ func checkDictionary(t *testing.T, matcher *Matcher, patterns []string, data [32
 	}
 
 	data[31] &= 0x7f
-	opposite := data
-	opposite[31] |= 0x80
 
-	want := referenceMatch(patterns, testEncoding.EncodeToString(data[:])) || referenceMatch(patterns, testEncoding.EncodeToString(opposite[:]))
+	want := referenceFilter(patterns, data)
 	if filter.Match(data) != want {
 		t.Fatalf("dictionary sign filter differs from union on %x", data)
 	}
@@ -381,7 +381,7 @@ func dictionaryPatterns(count int) []string {
 
 	for index := range patterns {
 		data := randomInput(random)
-		patterns[index] = testEncoding.EncodeToString(data[:])[:10]
+		patterns[index] = visibleEncoding(data[:])[:10]
 	}
 
 	return patterns

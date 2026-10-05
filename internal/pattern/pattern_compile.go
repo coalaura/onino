@@ -147,6 +147,9 @@ func (matcher *Matcher) addPattern(parsed parsedPattern, vector bool, ignoreSign
 
 		if parsed.first != 0 {
 			search.first &^= uint64(1) << 39
+		}
+
+		if parsed.last < encodedSize-1 {
 			search.last &^= uint64(1) << 4
 		}
 
@@ -233,23 +236,23 @@ func (matcher *Matcher) prepareSign(pattern *bitPattern, ignoreSign bool) {
 // CompilePatterns accepts lowercase a-z, digits 2-7, and these dot forms:
 // "text." (prefix), ".text" (suffix), "pre.suf" (both), ".text."
 // (strictly interior), and "text" (anywhere). Prefix and suffix may overlap
-// when their bits agree. Every supplied pattern must have at least one possible
-// 32-byte input; malformed or impossible patterns return an error and no matcher.
+// when their bits agree. Validation uses the first 52 visible hostname characters.
+// Malformed or impossible patterns return an error and no matcher.
 // Empty pattern lists match nothing; empty patterns are invalid.
 func CompilePatterns(patterns []string) (*Matcher, error) {
 	return compilePatterns(patterns, vectorAvailable)
 }
 
-func compilePatterns(patterns []string, vector bool) (*Matcher, error) {
-	matcher, err := compileMatcher(patterns, vector, false)
-	if err != nil || matcher.frequent {
-		return matcher, err
+func compilePublicPatterns(patterns []parsedPattern, vector bool) *Matcher {
+	matcher := compileMatcher(patterns, vector, false)
+	if matcher.frequent {
+		return matcher
 	}
 
 	if !matcher.signDependent {
 		matcher.signFilter = matcher
 
-		return matcher, nil
+		return matcher
 	}
 
 	if matcher.kind == matcherDictionary || matcher.kind == matcherAnchors {
@@ -258,53 +261,23 @@ func compilePatterns(patterns []string, vector bool) (*Matcher, error) {
 
 		matcher.signFilter = &filter
 
-		return matcher, nil
+		return matcher
 	}
 
-	matcher.signFilter, err = compileMatcher(patterns, vector, true)
+	matcher.signFilter = compileMatcher(patterns, vector, true)
 
-	return matcher, err
+	return matcher
 }
 
-func compileMatcher(patterns []string, vector bool, ignoreSign bool) (*Matcher, error) {
+func compileMatcher(parsedPatterns []parsedPattern, vector bool, ignoreSign bool) *Matcher {
 	matcher := &Matcher{kind: matcherGeneral}
-
-	seen := make(map[string]struct{}, len(patterns))
-	parsedPatterns := make([]parsedPattern, 0, len(patterns))
 
 	var (
 		eligible int
 		anchored int
 	)
 
-	for index, text := range patterns {
-		if _, exists := seen[text]; exists {
-			continue
-		}
-
-		seen[text] = struct{}{}
-
-		parsed, err := parsePattern(text)
-		if err != nil {
-			return nil, fmt.Errorf("pattern %d %q: %w", index, text, err)
-		}
-
-		var validation bitPattern
-
-		possible := false
-
-		if parsed.anchored {
-			possible = addLiteral(&validation, parsed.prefix, 0) && addLiteral(&validation, parsed.suffix, encodedSize-len(parsed.suffix))
-		} else if parsed.first <= parsed.last {
-			possible = addLiteral(&validation, parsed.literal, parsed.first)
-		}
-
-		if !possible {
-			return nil, fmt.Errorf("pattern %d %q cannot match a 32-byte base32 value", index, text)
-		}
-
-		parsedPatterns = append(parsedPatterns, parsed)
-
+	for _, parsed := range parsedPatterns {
 		if indexedAnchor(parsed) {
 			anchored++
 		}
@@ -338,7 +311,7 @@ func compileMatcher(patterns []string, vector bool, ignoreSign bool) (*Matcher, 
 
 	matcher.finish()
 
-	return matcher, nil
+	return matcher
 }
 
 func parsePattern(text string) (parsedPattern, error) {

@@ -162,7 +162,7 @@ func measureSearch(t *testing.T, config measureConfig) measurement {
 	case "shared512":
 		patterns = benchmarkDictionary(512, true)
 	case "all_hits", "persistence":
-		patterns = []string{".a", ".q"}
+		patterns = allSuffixPatterns(1)
 	default:
 		t.Fatalf("unknown workload %q", config.workload)
 	}

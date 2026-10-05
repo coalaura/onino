@@ -46,7 +46,7 @@ func (diagram *probabilityDiagram) node(branch probabilityBranch) uint32 {
 	return index
 }
 
-func (diagram *probabilityDiagram) condition(condition *bitPattern) uint32 {
+func (diagram *probabilityDiagram) condition(condition *probabilityCondition) uint32 {
 	root := uint32(1)
 
 	// Build from the last constrained bit, keeping every branch in bit order.
@@ -130,7 +130,7 @@ func (diagram *probabilityDiagram) union(left, right uint32) uint32 {
 	return root
 }
 
-func exactProbability(conditions []bitPattern, limit int) (float64, bool) {
+func exactProbability(conditions []probabilityCondition, limit int) (float64, bool) {
 	capacity := min(limit, 4096, max(2, len(conditions)*64+2))
 
 	diagram := probabilityDiagram{
@@ -142,8 +142,8 @@ func exactProbability(conditions []bitPattern, limit int) (float64, bool) {
 		complete:  true,
 	}
 
-	diagram.nodes[0].branch.bit = 256
-	diagram.nodes[1].branch.bit = 256
+	diagram.nodes[0].branch.bit = 260
+	diagram.nodes[1].branch.bit = 260
 	diagram.nodes[1].chance = 1
 
 	root := uint32(0)

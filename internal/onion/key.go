@@ -22,19 +22,12 @@ var encoding = base32.NewEncoding("abcdefghijklmnopqrstuvwxyz234567").WithPaddin
 
 // Hostname returns the full, checksummed 56-character label plus ".onion".
 func (key *Key) Hostname() string {
-	var checksumInput [len(checksumPrefix) + 32 + 1]byte
-
-	copy(checksumInput[:], checksumPrefix)
-	copy(checksumInput[len(checksumPrefix):], key.Public[:])
-
-	checksumInput[len(checksumInput)-1] = version
-
-	checksum := sha3.Sum256(checksumInput[:])
+	checksum := Checksum(&key.Public)
 
 	var address [35]byte
 
 	copy(address[:], key.Public[:])
-	copy(address[32:], checksum[:2])
+	copy(address[32:], checksum[:])
 
 	address[34] = version
 
@@ -45,4 +38,18 @@ func (key *Key) Hostname() string {
 	copy(hostname[56:], ".onion")
 
 	return string(hostname[:])
+}
+
+// Checksum returns the two checksum bytes used by a v3 onion hostname.
+func Checksum(public *[32]byte) [2]byte {
+	var checksumInput [len(checksumPrefix) + 32 + 1]byte
+
+	copy(checksumInput[:], checksumPrefix)
+	copy(checksumInput[len(checksumPrefix):], public[:])
+
+	checksumInput[len(checksumInput)-1] = version
+
+	checksum := sha3.Sum256(checksumInput[:])
+
+	return [2]byte{checksum[0], checksum[1]}
 }

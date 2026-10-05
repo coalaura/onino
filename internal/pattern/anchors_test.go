@@ -13,7 +13,7 @@ func TestAnchoredDictionary(t *testing.T) {
 
 	for range 30 {
 		data := randomInput(random)
-		encoded := testEncoding.EncodeToString(data[:])
+		encoded := visibleEncoding(data[:])
 
 		for _, length := range lengths {
 			forms := []string{encoded[:length] + ".", "." + encoded[encodedSize-length:], encoded[:length] + "." + encoded[length-1:]}
@@ -26,7 +26,8 @@ func TestAnchoredDictionary(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				if matcher.anchors == nil {
+				indexed := matcher.anchors != nil || matcher.boundary != nil && (matcher.boundary.filter.anchors != nil || matcher.boundary.body != nil && matcher.boundary.body.anchors != nil)
+				if !indexed {
 					t.Fatal("anchored index not selected")
 				}
 
@@ -54,7 +55,7 @@ func FuzzAnchoredDictionary(f *testing.F) {
 		}
 
 		data := [32]byte(input)
-		text := testEncoding.EncodeToString(data[:])
+		text := visibleEncoding(data[:])
 
 		position := int(length)%encodedSize + 1
 		patterns := append(slices.Clip(background), text[:position]+"."+text[position-1:])

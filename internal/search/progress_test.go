@@ -16,7 +16,7 @@ var benchmarkProgress Stats
 
 func TestRunProgress(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		matcher, err := pattern.CompilePatterns([]string{".a", ".q"})
+		matcher, err := pattern.CompilePatterns(allSuffixPatterns(1))
 		if err != nil {
 			t.Fatal(err)
 		}

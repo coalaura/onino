@@ -114,7 +114,7 @@ func TestOffsetSecretCarries(t *testing.T) {
 }
 
 func TestRunKeepsEveryMatch(t *testing.T) {
-	matcher, err := pattern.CompilePatterns([]string{".a", ".q"})
+	matcher, err := pattern.CompilePatterns(allSuffixPatterns(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestRunKeepsEveryMatch(t *testing.T) {
 }
 
 func TestRunCancellationAndSaveError(t *testing.T) {
-	matcher, err := pattern.CompilePatterns([]string{".a", ".q"})
+	matcher, err := pattern.CompilePatterns(allSuffixPatterns(1))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,8 +10,23 @@ import (
 
 const probabilityNodeLimit = 65536
 
-// EstimateProbability estimates the OR of all patterns under uniform 256-bit
-// inputs, including canonical base32 padding. It is startup-only and does not
+type probabilityCondition struct {
+	mask  [5]uint64
+	value [5]uint64
+}
+
+func (condition *probabilityCondition) matches(input *[5]uint64) bool {
+	for index, mask := range condition.mask {
+		if input[index]&mask != condition.value[index] {
+			return false
+		}
+	}
+
+	return true
+}
+
+// EstimateProbability estimates the OR of all patterns under uniform public-key
+// bits and four independent checksum bits. It is startup-only and does not
 // change the matcher. Curve encodings and successive search candidates are not
 // truly independent uniform inputs, so waiting times remain estimates.
 func EstimateProbability(patterns []string) (float64, error) {
@@ -36,9 +51,9 @@ func EstimateProbability(patterns []string) (float64, error) {
 	return sampleProbability(conditions), nil
 }
 
-func probabilityConditions(patterns []string) ([]bitPattern, error) {
-	conditions := make([]bitPattern, 0, len(patterns))
-	seen := make(map[bitPattern]bool, len(patterns))
+func probabilityConditions(patterns []string) ([]probabilityCondition, error) {
+	conditions := make([]probabilityCondition, 0, len(patterns))
+	seen := make(map[probabilityCondition]bool, len(patterns))
 
 	for index, text := range patterns {
 		parsed, err := parsePattern(text)
@@ -56,19 +71,26 @@ func probabilityConditions(patterns []string) ([]bitPattern, error) {
 		}
 
 		for position := first; position <= last; position++ {
-			var (
-				condition bitPattern
-				valid     bool
-			)
+			occurrence := parsed
 
-			if parsed.anchored {
-				valid = addLiteral(&condition, parsed.prefix, 0) && addLiteral(&condition, parsed.suffix, encodedSize-len(parsed.suffix))
-			} else {
-				valid = addLiteral(&condition, parsed.literal, position)
+			if !parsed.anchored {
+				occurrence.first = position
+				occurrence.last = position
 			}
 
+			_, checksum, public, valid := publicPattern(occurrence)
 			if !valid {
 				continue
+			}
+
+			var condition probabilityCondition
+
+			copy(condition.mask[:], public.mask[:])
+			copy(condition.value[:], public.value[:])
+
+			if checksum >= 0 {
+				condition.mask[4] = 15
+				condition.value[4] = uint64(checksum)
 			}
 
 			possible = true
@@ -80,7 +102,7 @@ func probabilityConditions(patterns []string) ([]bitPattern, error) {
 		}
 
 		if !possible {
-			return nil, fmt.Errorf("pattern %d %q: impossible for a 32-byte input", index, text)
+			return nil, fmt.Errorf("pattern %d %q: impossible in the first 52 hostname characters", index, text)
 		}
 	}
 
@@ -91,7 +113,7 @@ func probabilityConditions(patterns []string) ([]bitPattern, error) {
 // unions fall back to weighted union sampling: draw a condition proportional to
 // its probability, then a uniform input satisfying it, and weight by 1/coverage.
 // Unlike sampling random keys, this also works for astronomically rare matches.
-func sampleProbability(conditions []bitPattern) float64 {
+func sampleProbability(conditions []probabilityCondition) float64 {
 	weights := make([]float64, len(conditions))
 
 	var (
@@ -125,7 +147,7 @@ func sampleProbability(conditions []bitPattern) float64 {
 
 		condition := &conditions[min(index, len(conditions)-1)]
 
-		var input [4]uint64
+		var input [5]uint64
 
 		for word := range input {
 			input[word] = random.Uint64()&^condition.mask[word] | condition.value[word]
@@ -145,7 +167,7 @@ func sampleProbability(conditions []bitPattern) float64 {
 	return max(lower, min(1, total*covered/float64(samples)))
 }
 
-func conditionProbability(condition *bitPattern) float64 {
+func conditionProbability(condition *probabilityCondition) float64 {
 	constrained := 0
 
 	for _, mask := range condition.mask {

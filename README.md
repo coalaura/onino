@@ -1,6 +1,6 @@
 # onino
 
-CPU-only vanity v3 `.onion` address search. onino matches public keys against compiled patterns and keeps searching after saving matches. It defaults to one worker; use `--cpu` for multicore search.
+CPU-only vanity v3 `.onion` address search across the first **52 visible hostname characters**. onino matches public keys against compiled patterns and keeps searching after saving matches. It defaults to one worker; use `--cpu` for multicore search.
 
 ## Build and use
 
@@ -20,11 +20,11 @@ Use `--help` for usage and `--output` / `-o` to select the destination directory
 
 Patterns are ORed together. Supported forms are `prefix.`, `.suffix`, `prefix.suffix`, `.interior.` and `anywhere`; see [the matcher documentation](internal/pattern/README.md) for precise rules and validation.
 
-Matching uses the **standalone lowercase, unpadded base32 encoding of the 32-byte public key**, excluding the checksum and version bytes. That representation has 52 symbols and ends in `a` or `q`. Its last symbol contains zero padding, whereas character 52 of the complete onion address also contains checksum bits; suffix patterns refer to the standalone key representation.
+All patterns match the **first 52 characters actually printed in the hostname**. A suffix ends at character 52: `.aaa` produces a hostname shaped like `...aaa????.onion`, with four further checksum/version characters. Character 52 mixes one public-key bit with four checksum bits and can be any `a-z2-7` character. The matcher filters public-key bits first and computes the checksum only when needed to verify the visible spelling.
 
 The search continues until Ctrl+C or an error. Cancellation finishes each worker's current batch of 512 checked candidates, including synchronous saves, so frequent matches or slow storage can delay shutdown. Successfully saved hostnames are printed to stdout with the time since the previous match (or search start for the first) and total search time, for example `example.onion in 12.34s (23.45s total)`. About every four seconds, one line on stderr shows total keys checked, elapsed time and overall average keys/second; intermediate counters are approximate and final counts are exact. Reporting waits for an available callback slot when a save is in progress.
 
-Startup shows approximate candidate counts for a **50% and 95% chance of at least one match** across all patterns. Progress converts those counts into estimated waits from now using the overall average rate. Estimates account for overlapping patterns and base32 padding, but assume independent uniform candidates; they are guidance, not deadlines or guarantees.
+Startup shows approximate candidate counts for a **50% and 95% chance of at least one match** across all patterns. Progress converts those counts into estimated waits from now using the overall average rate. Estimates account for overlapping patterns and the four checksum bits in character 52, but assume independent uniform candidates; they are guidance, not deadlines or guarantees.
 
 ## Saved matches
 
@@ -44,7 +44,7 @@ The key pair is checked before writing. Files are flushed inside a private stagi
 ## Search engine
 
 1. **Generate pairs around independent centers.** The usual engine starts 256 independently seeded affine Edwards25519 centers. A table of 64 offsets `j.8B` produces `P+Q` and `P-Q` together, sharing arithmetic and one batch inversion. Centers advance between table passes instead of being rebuilt for every candidate.
-2. **Match before completing the sign.** Candidates first have canonical Y bytes. A necessary-condition filter ignores only the unknown compressed-point sign; survivors get their exact X/sign using retained reciprocals, then pass the full matcher. The sign affects base32 character 50, one-based. Matching reads raw key bytes without constructing base32 strings.
+2. **Match before completing the sign.** Candidates first have canonical Y bytes. A necessary-condition filter ignores the unknown compressed-point sign and checksum constraints; survivors get their exact X/sign using retained reciprocals, then pass the full matcher. The sign affects base32 character 50, one-based and must be completed before hashing. Matching reads raw key bytes without constructing base32 strings.
 3. **Save at most one key per seed.** After a hit, onino saves a value snapshot, discards any pending relative from that seed and reseeds independently from `crypto/rand`. Discarded candidates are replaced and never counted as checked. Scalar offsets preserve clamping, reserve headroom and stay within bounded reseeding epochs.
 
 Very frequent short patterns use an independently seeded projective `8B` walk instead, avoiding the cost of repeatedly rebuilding affine centers. This selection happens once at compilation/startup; both engines use the same save and validation contract.
@@ -59,7 +59,7 @@ Steady-state search performs no heap allocations. Each worker owns its generator
 
 ### Single-worker baseline
 
-PACE Go 1.27.1 on Windows 11/amd64 and an AMD Ryzen 9 9950X3D, with `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Values are medians from ten alternating one-second runs against baseline `d01aa81`; lower ns/key is better. Stock Go and `purego` remain tested compatibility targets.
+PACE Go 1.27.1 on Windows 11/amd64 and an AMD Ryzen 9 9950X3D, with `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Values are medians from ten alternating one-second runs against baseline `d01aa81`; lower ns/key is better. These historical measurements predate visible character-52 matching; [visible-suffix measurements](RESEARCH.md#visible-character-52-matching) cover the updated boundary. Stock Go and `purego` remain tested compatibility targets.
 
 | Workload | PACE, ns/key | PACE keys/second |
 | --- | ---: | ---: |

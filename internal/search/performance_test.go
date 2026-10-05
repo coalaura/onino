@@ -26,7 +26,7 @@ func BenchmarkWorkloads(b *testing.B) {
 		{name: "mixed", patterns: []string{"hello.", ".worlda", "start.enda", ".middle.", "anywhere"}},
 		{name: "prefix50", patterns: []string{"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwx."}},
 		{name: "frequent", patterns: []string{"ab."}},
-		{name: "all_hits", patterns: []string{".a", ".q"}},
+		{name: "all_hits", patterns: allSuffixPatterns(1)},
 		{name: "64", patterns: benchmarkDictionary(64, false)},
 		{name: "128", patterns: benchmarkDictionary(128, false)},
 		{name: "256", patterns: benchmarkDictionary(256, false)},
@@ -195,7 +195,7 @@ func BenchmarkFullSearch(b *testing.B) {
 	cases := []benchmarkCase{
 		{name: "rare", patterns: []string{"somethingrare."}},
 		{name: "frequent", patterns: []string{"ab."}},
-		{name: "all_hits", patterns: []string{".a", ".q"}},
+		{name: "all_hits", patterns: allSuffixPatterns(1)},
 		{name: "512", patterns: benchmarkDictionary(512, false)},
 		{name: "shared512", patterns: benchmarkDictionary(512, true)},
 		{name: "mixed512", patterns: mixed},

@@ -157,13 +157,63 @@ Windows race binaries built with `builder test go --no-pace --cgo --dyn --compat
 
 ## Match probability estimates
 
-The CLI estimates the probability of matching any supplied pattern once at startup, independently of the search engine. It reuses the parser and bit constraints, expands valid literal positions and forms their union under a uniform 256-bit input model. This includes final-symbol padding, overlapping anchors, contained patterns and self-overlapping literals; summing individual probabilities would overcount these cases. A bounded decision diagram computes the union exactly when practical. Complex dictionaries fall back to deterministic weighted union sampling, drawing a condition proportional to its probability and weighting a satisfying input by inverse coverage. Conditioning on matches retains extremely rare probabilities that naive random-key sampling would miss. This estimation PRNG is unrelated to secure search entropy.
+The CLI estimates the probability of matching any supplied pattern once at startup, independently of the search engine. It reuses the parser and bit constraints, expands valid literal positions and forms their union under a model of 256 uniform public-key bits plus four independent checksum bits. This includes the visible character-52 boundary, overlapping anchors, contained patterns and self-overlapping literals; summing individual probabilities would overcount these cases. Fully specified public keys have their checksum validated at compilation, leaving 256 constrained bits. A bounded decision diagram computes the union exactly when practical. Complex dictionaries fall back to deterministic weighted union sampling, drawing a condition proportional to its probability and weighting a satisfying input by inverse coverage. Conditioning on matches retains extremely rare probabilities that naive random-key sampling would miss. This estimation PRNG is unrelated to secure search entropy.
 
 For per-candidate probability `p` and confidence `c`, the precomputed count is `ceil(log(1-c) / log1p(-p))`, with explicit all-hit/zero-probability cases. A seven-character prefix such as `example.` has model probability `32^-7`: about 23,816,355,775 candidates for 50% and 102,932,577,139 for 95%. `32^7` is the mean waiting count, not certainty. There is no finite 100% wait unless every candidate matches.
 
 Progress divides these two counts by the overall `checked / elapsed` rate. It estimates the next wait from now, without subtracting past checks or saves. The IID model is approximate: actual curve encodings and successive search candidates are not independent uniform 256-bit inputs. Large-union sampling adds estimation error. Formatting uses a reusable buffer and floating-point seconds, including waits beyond `time.Duration`'s range. The updated PACE status benchmark measured 88-93 ns/report with 0 B/op and 0 allocs/op; probability analysis and logarithms are outside reporting and search loops.
 
-On the same host, one-time probability analysis measured about 107 ns/64 allocated bytes for `example.`, 7.4 ms/8.1 MB for `example` anywhere and 21.1 ms/29.5 MB for the 512-word test dictionary. Temporary diagram/sampling allocations belong to startup, not steady-state search. Reproduce with `pace test -vet=off -run '^$' -bench 'Benchmark(SearchStatus|EstimateProbability)' -benchmem . ./internal/pattern`. Analytical overlap/padding cases, exhaustive small unions, rare-event sampling, confidence thresholds and zero-allocation formatting are tested; PACE/stock native/purego suites and the affected Linux race suites passed.
+Before the visible-checksum change, one-time probability analysis on the same host measured about 107 ns/64 allocated bytes for `example.`, 7.4 ms/8.1 MB for `example` anywhere and 21.1 ms/29.5 MB for the 512-word test dictionary. Temporary diagram/sampling allocations belong to startup, not steady-state search. Reproduce with `pace test -vet=off -run '^$' -bench 'Benchmark(SearchStatus|EstimateProbability)' -benchmem . ./internal/pattern`. Analytical overlap/checksum cases, exhaustive small unions, rare-event sampling, confidence thresholds and zero-allocation formatting are tested.
+
+## Visible character-52 matching
+
+The search window is the first 52 visible hostname characters, not independently padded public-key base32. Character 52 has one public-key bit and the high four bits of the first SHA3-256 checksum byte. A suffix `.aaa` therefore constrains eleven public-key bits and four checksum bits, giving model probability `2^-15`; the public-key-only filter admits about `2^-11` of fully signed candidates. All 32 final symbols remain searchable and checksum work always uses the real completed point sign.
+
+Compilation separates ordinary occurrences from occurrences ending at character 52. Ordinary matches return immediately. Boundary candidates pass raw public-key constraints before a single shared checksum calculation, then select the matching checksum-nibble constraints. Identical public constraints merge their accepted nibbles; all sixteen accepted nibbles eliminate the hash entirely. Fully specified keys have their checksum checked once during compilation. The existing 64-byte raw constraints, 16-byte scan plans, assembly layouts and candidate generation remain intact.
+
+Sets consisting only of one-, two- or three-character suffixes use a direct table indexed by the final public-key bits. Their tables contain 2, 64 or 2,048 two-byte masks (4, 128 or 4,096 bytes). A zero mask rejects before hashing; a complete mask accepts without hashing. This keeps simple suffix matching allocation-free and avoids walking alternatives. A single one-character suffix still needs SHA3 for about half the candidates and reseeds after about one in 32; those costs are inherent in visible matching and the existing saved-key independence contract.
+
+The following bounded crossover screen used PACE Go 1.27.1 on the same Windows/9950X3D host, one worker without affinity, three 400 ms samples per case. Values are median [minimum, maximum] ns/key. Both engines include matching, callbacks and reseeding using deterministic benchmark entropy, without disk persistence. All samples reported **0 B/op and 0 allocs/op**.
+
+| Suffix | Independent walk | Paired engine | Selected engine, million keys/s |
+| --- | ---: | ---: | ---: |
+| `.a` | 448.2 [444.4, 450.0] | 487.6 [487.0, 492.6] | Walk, 2.23 |
+| `.aa` | 81.89 [81.49, 82.13] | 52.06 [51.99, 52.17] | Paired, 19.21 |
+| `.aaa` | 70.35 [70.20, 70.61] | 38.79 [38.71, 38.81] | Paired, 25.78 |
+| `.aaaa` | 70.10 [70.05, 70.10] | 38.25 [38.21, 38.27] | Paired, 26.14 |
+
+Reproduce with `pace test -vet=off ./internal/search -run '^$' -bench '^BenchmarkEngineCrossover$/suffix' -benchmem -benchtime=400ms -count=3 -cpu=1`. The existing engine-selection hints choose the faster engine in each tested suffix case. Older suffix/crossover measurements elsewhere in this document used the padded-key boundary and have different hit rates.
+
+A separate three-sample 300 ms before/after `BenchmarkFullSearch` check showed no material regression in the existing workloads: rare prefix 38.70→38.80 ns/key, frequent prefix 47.90→47.68, all-hit 7,559→7,543 ordinary dictionary 63.55→62.45, shared dictionary 62.79→62.21, mixed 65.83→65.20 and short 480.3→470.1. These unpinned bounded screens are regression checks, not a statistical claim of improvement. The updated all-hit fixture includes all 32 one-character suffixes; `.a` and `.q` alone no longer cover every candidate.
+
+Validation includes the originally reported padding-only `.aaa` false positive, every two-byte public tail against independent SHA3/base32 hostname references, scalar/vector short-suffix alternatives, merged checksum coverage, full-key checksum validation, exact saved keys from both engines and zero matcher allocations. PACE and stock-Go native/purego suites passed, as did Linux native/purego race suites. Custom vet passed for native/purego Windows, Linux amd64/arm64 and Darwin.
+
+### No-save cost breakdown
+
+`BenchmarkSuffixCosts` separates generation/matching from per-hit handling using the production-selected engine. `matching_only` generates real candidates, completes the necessary signs, verifies the actual checksum and counts matches, without exporting keys or reseeding on hits. `reseed_shake` uses the production search batch, immutable snapshots, a cheap callback and reproducible SHAKE entropy. `reseed_random` uses the same production path with `crypto/rand.Reader` for hit-triggered reseeding. None performs hostname formatting, console output or filesystem writes. Initial worker construction remains outside the timer; the matching-only path is a diagnostic, not the saved-key search path.
+
+On the same Windows/9950X3D host with PACE Go 1.27.1, one worker without affinity, three 750 ms samples per case gave the following median [minimum, maximum] ns/key. All 54 samples reported **0 B/op and 0 allocs/op**. The two single-character cases use the independent walk; the other cases use the paired engine.
+
+| Pattern | Generation/matching only | With SHAKE reseeding | With OS-random reseeding |
+| --- | ---: | ---: | ---: |
+| `somethingrare.` | 38.24 [38.17, 38.49] | 38.27 [38.11, 38.31] | 38.23 [38.18, 38.25] |
+| `a.` | 83.63 [79.38, 84.68] | 320.0 [315.4, 325.6] | 320.9 [316.0, 321.4] |
+| `.a` | 222.3 [214.5, 226.2] | 476.2 [473.0, 483.9] | 463.3 [462.2, 464.8] |
+| `.aa` | 44.89 [44.52, 45.88] | 53.82 [53.80, 54.12] | 53.64 [52.84, 54.63] |
+| `.aaa` | 39.96 [39.19, 41.17] | 41.15 [39.97, 41.40] | 39.32 [39.27, 39.49] |
+| `.aaaa` | 39.20 [38.67, 39.81] | 39.64 [39.22, 39.95] | 39.40 [39.04, 39.74] |
+
+Without per-hit handling, `.a` reaches 4.50 million keys/s; retaining normal OS-random reseeding gives 2.16 million keys/s, still without any saving. The corresponding `.aa` rates are 22.28 and 18.64 million keys/s. Both longer suffixes remain around 25 million keys/s; small reversals between modes are within the variability of these unpinned samples. The `a.` control has the same expected 1/32 hit rate as `.a` but no checksum calculation, reaching 11.96 million keys/s before hit handling.
+
+Independent three-sample 750 ms microbenchmarks measured a checksum at 254.0 [253.0, 255.4] ns, independent-walk SHAKE reseeding at 7,492 [7,448, 7,544] ns, OS-random reseeding at 7,480 [7,463, 7,481] ns and snapshot/callback at 8.605 [8.571, 8.608] ns. All were allocation-free. For `.a`, hashing half the candidates contributes roughly 127 ns per candidate and reseeding one in 32 contributes roughly 234 ns per candidate. These costs explain the large slowdown despite a tiny lookup table; random acquisition and the benchmark callback are not the dominant costs. A table indexed by the final public bits cannot supply checksum bits, which depend on the entire public key. Longer suffixes reject much more work before hashing: `.aa` admits about 1/64 of candidates, `.aaa` about 1/2,048 and `.aaaa` about 1/65,536. Actual storage and output can add further overhead, which these measurements intentionally exclude.
+
+Reproduce with:
+
+```sh
+pace test -vet=off ./internal/search -run '^$' -bench '^BenchmarkSuffixCosts$' -benchmem -benchtime=750ms -count=3 -cpu=1
+pace test -vet=off ./internal/onion -run '^$' -bench '^BenchmarkHitCosts$/checksum$' -benchmem -benchtime=750ms -count=3 -cpu=1
+pace test -vet=off ./internal/search -run '^$' -bench '^BenchmarkHitHandling$' -benchmem -benchtime=750ms -count=3 -cpu=1
+```
 
 ## Sequential arithmetic experiments
 

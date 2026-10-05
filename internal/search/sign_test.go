@@ -1,7 +1,6 @@
 package search
 
 import (
-	"encoding/base32"
 	"testing"
 
 	"github.com/coalaura/onino/internal/onion"
@@ -53,21 +52,12 @@ func TestDeferredBatchMultipleHits(t *testing.T) {
 	reference := *state
 	reference.next()
 
-	encoding := base32.StdEncoding.WithPadding(base32.NoPadding)
 	patterns := make([]string, batchSize)
 
 	for index := range patterns {
-		text := encoding.EncodeToString(reference.publicKeys[index][:])
-		// Convert the standard uppercase alphabet without changing the key bits.
-		lower := []byte(text)
+		key := onion.Key{Public: reference.publicKeys[index]}
 
-		for offset, character := range lower {
-			if character >= 'A' && character <= 'Z' {
-				lower[offset] += 'a' - 'A'
-			}
-		}
-
-		patterns[index] = string(lower) + "."
+		patterns[index] = key.Hostname()[:52] + "."
 	}
 
 	matcher, err := pattern.CompilePatterns(patterns)

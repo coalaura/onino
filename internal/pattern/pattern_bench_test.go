@@ -141,7 +141,7 @@ func BenchmarkMatcherPatternCount(bench *testing.B) {
 
 			for index := range patterns {
 				data := randomInput(random)
-				patterns[index] = testEncoding.EncodeToString(data[:])[:6]
+				patterns[index] = visibleEncoding(data[:])[:6]
 			}
 
 			matcher, err := CompilePatterns(patterns)
@@ -209,7 +209,7 @@ func matchingInputs(bench *testing.B, pattern string) [][32]byte {
 	for index := range inputs {
 		data := randomInput(random)
 
-		encoded := []byte(testEncoding.EncodeToString(data[:]))
+		encoded := []byte(visibleEncoding(data[:]))
 
 		if parsed.anchored {
 			copy(encoded, parsed.prefix)
