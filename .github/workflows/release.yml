@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags: ["**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows, linux, darwin]
+        arch: [amd64, arm64]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build with PACE
+        id: build
+        uses: coalaura/build@v1
+        with:
+          os: ${{ matrix.os }}
+          arch: ${{ matrix.arch }}
+          pace: true
+          generate: false
+          output: dist/onino-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+
+      - name: Sign binary
+        id: sign
+        uses: coalaura/sign@v1
+        with:
+          path: ${{ steps.build.outputs.path }}
+          key: ${{ secrets.COALAURA_PFX }}
+          passphrase: ${{ secrets.COALAURA_PFX_PASSWORD }}
+          chain: |
+            https://wiese2.org/pki/issuing.pem
+            https://wiese2.org/pki/root.pem
+
+      - name: Attest build provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.sign.outputs.path }}
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: onino-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ steps.sign.outputs.path }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: onino-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum onino-* > SHA256SUMS
+
+      - name: Publish binaries
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/onino-*
+            dist/SHA256SUMS
