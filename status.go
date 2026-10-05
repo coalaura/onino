@@ -7,7 +7,7 @@ import (
 	"github.com/coalaura/onino/internal/search"
 )
 
-func appendSearchStatus(buffer []byte, stats search.Stats, elapsed time.Duration, rate float64, final bool) []byte {
+func appendSearchStatus(buffer []byte, stats search.Stats, elapsed time.Duration, rate float64, estimate matchEstimate, final bool) []byte {
 	var digits [32]byte
 
 	number := strconv.AppendUint(digits[:0], stats.Checked, 10)
@@ -31,7 +31,21 @@ func appendSearchStatus(buffer []byte, stats search.Stats, elapsed time.Duration
 
 	buffer = appendGroupedDigits(buffer, number)
 
-	return append(buffer, " keys/s).\n"...)
+	buffer = append(buffer, " keys/s avg)"...)
+
+	if !final {
+		buffer = append(buffer, "; est. wait from now: 50% "...)
+
+		if rate > 0 {
+			buffer = appendWaitEstimate(buffer, estimate.candidates50/rate)
+			buffer = append(buffer, ", 95% "...)
+			buffer = appendWaitEstimate(buffer, estimate.candidates95/rate)
+		} else {
+			buffer = append(buffer, "--, 95% --"...)
+		}
+	}
+
+	return append(buffer, ".\n"...)
 }
 
 func appendGroupedDigits(buffer, digits []byte) []byte {

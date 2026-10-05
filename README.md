@@ -22,7 +22,9 @@ Patterns are ORed together. Supported forms are `prefix.`, `.suffix`, `prefix.su
 
 Matching uses the **standalone lowercase, unpadded base32 encoding of the 32-byte public key**, excluding the checksum and version bytes. That representation has 52 symbols and ends in `a` or `q`. Its last symbol contains zero padding, whereas character 52 of the complete onion address also contains checksum bits; suffix patterns refer to the standalone key representation.
 
-The search continues until Ctrl+C or an error. Cancellation finishes each worker's current batch of 512 checked candidates, including synchronous saves, so frequent matches or slow storage can delay shutdown. Successfully saved hostnames are printed to stdout. About every four seconds, one line on stderr shows total keys checked, elapsed time and recent keys/second; intermediate counters are approximate and final counts are exact. Reporting waits for an available callback slot when a save is in progress.
+The search continues until Ctrl+C or an error. Cancellation finishes each worker's current batch of 512 checked candidates, including synchronous saves, so frequent matches or slow storage can delay shutdown. Successfully saved hostnames are printed to stdout with the time since the previous match (or search start for the first) and total search time, for example `example.onion in 12.34s (23.45s total)`. About every four seconds, one line on stderr shows total keys checked, elapsed time and overall average keys/second; intermediate counters are approximate and final counts are exact. Reporting waits for an available callback slot when a save is in progress.
+
+Startup shows approximate candidate counts for a **50% and 95% chance of at least one match** across all patterns. Progress converts those counts into estimated waits from now using the overall average rate. Estimates account for overlapping patterns and base32 padding, but assume independent uniform candidates; they are guidance, not deadlines or guarantees.
 
 ## Saved matches
 

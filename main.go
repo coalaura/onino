@@ -61,6 +61,13 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
+	probability, err := pattern.EstimateProbability(command.Args().Slice())
+	if err != nil {
+		return err
+	}
+
+	estimate := newMatchEstimate(probability)
+
 	topology, err := cpu.Discover()
 	if err != nil {
 		return err
@@ -99,25 +106,19 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 
 	fmt.Fprintf(command.ErrWriter, "Searching with %d worker(s), %s; saving matches to %s. Press Ctrl+C to stop.\n", workers, placement, output)
 
-	started := time.Now()
-	lastReport := started
+	var progressBuffer [320]byte
 
-	var (
-		lastChecked    uint64
-		progressBuffer [192]byte
-	)
+	command.ErrWriter.Write(appendCandidateEstimate(progressBuffer[:0], estimate))
+
+	started := time.Now()
+	lastMatch := started
 
 	progress := func(stats search.Stats) {
-		now := time.Now()
-		rate := float64(stats.Checked-lastChecked) / now.Sub(lastReport).Seconds()
-
-		lastReport = now
-		lastChecked = stats.Checked
+		elapsed := time.Since(started)
+		rate := float64(stats.Checked) / elapsed.Seconds()
 
 		// Reuse the line buffer so periodic reporting does not allocate.
-		elapsed := now.Sub(started).Truncate(time.Second)
-
-		line := appendSearchStatus(progressBuffer[:0], stats, elapsed, rate, false)
+		line := appendSearchStatus(progressBuffer[:0], stats, elapsed.Truncate(time.Second), rate, estimate, false)
 
 		command.ErrWriter.Write(line)
 	}
@@ -125,12 +126,19 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 	options := search.Options{Workers: workers, CPUs: processors, Progress: progress}
 
 	stats, err := search.RunWithOptions(ctx, matcher, func(key onion.Key) error {
+		found := time.Now()
+
 		saveError := store.Save(key)
 		if saveError != nil {
 			return saveError
 		}
 
-		fmt.Fprintln(command.Writer, key.Hostname())
+		matchSeconds := found.Sub(lastMatch).Seconds()
+		totalSeconds := found.Sub(started).Seconds()
+
+		fmt.Fprintf(command.Writer, "%s in %.2fs (%.2fs total)\n", key.Hostname(), matchSeconds, totalSeconds)
+
+		lastMatch = found
 
 		return nil
 	}, options)
@@ -138,7 +146,7 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 	elapsed := time.Since(started)
 	rate := float64(stats.Checked) / elapsed.Seconds()
 
-	line := appendSearchStatus(progressBuffer[:0], stats, elapsed.Round(time.Millisecond), rate, true)
+	line := appendSearchStatus(progressBuffer[:0], stats, elapsed.Round(time.Millisecond), rate, estimate, true)
 
 	command.ErrWriter.Write(line)
 

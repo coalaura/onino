@@ -42,5 +42,9 @@ func TestCPUFlag(t *testing.T) {
 		if value == "" && (!strings.Contains(output.String(), "1 worker(s), OS placement") || runtime.GOMAXPROCS(0) != 1) {
 			t.Fatal("default did not preserve direct single-worker execution")
 		}
+
+		if wantSuccess && !strings.Contains(output.String(), "Estimated candidates for a match: 50% ~") {
+			t.Fatal("startup did not show combined match estimates")
+		}
 	}
 }
