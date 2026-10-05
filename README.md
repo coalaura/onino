@@ -81,7 +81,7 @@ Run benchmarks serially with `GOMAXPROCS=1`, `GOAMD64=v1` and consistent CPU aff
 
 ### Optimization history
 
-Sixteen cumulative milestones, rebuilt with the same PACE toolchain and measured with one full-search harness. Rare-prefix search went from **125.5 to 40.16 ns/key (3.13× throughput)**; a 512-pattern anywhere dictionary went from **348.3 to 69.58 ns/key (5.01×)**.
+Sixteen cumulative milestones, built with the same PACE toolchain and measured with one full-search harness. Rare-prefix search went from **125.5 to 40.16 ns/key (3.13× throughput)**; a 512-pattern anywhere dictionary went from **348.3 to 69.58 ns/key (5.01×)**.
 
 ![Full-search performance across sixteen milestones, from the first batched projective engine through paired affine generation and dedicated squaring.](.github/performance-history.svg)
 
