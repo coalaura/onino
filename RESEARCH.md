@@ -558,3 +558,296 @@ pace test -vet=off -pgo=off ./internal/pattern -run '^$' -bench '^BenchmarkCompi
 - Custom `vet` passed for native/purego and Linux amd64/arm64 and Darwin arm64 targets. A PACE Windows binary and stock-Go cross-builds succeeded; non-Windows binaries were not executed. Feature-poor hardware was not available, so the portable test matrix supplies fallback coverage.
 
 For example, run `pace test -vet=off ./internal/search -run '^$' -fuzz '^FuzzPaired$' -fuzztime=10s -parallel=1`, then repeat with `-tags purego`. The corresponding matcher targets are `FuzzSignFilter`, `FuzzDictionary` and `FuzzAnchoredDictionary`; arithmetic uses `FuzzFieldArithmetic`. The custom `vet --tests ./...` and `vet --tests --tags purego ./...` commands provide static checks without invoking stock vet separately.
+
+## Small anchored word sets
+
+### Baseline and retained implementation
+
+This pass starts at `15ccb81`. Relative to the requested reference `c08dd8d76e2f116419de824d685dc19828e7e311`, only README, release-workflow and SVG files changed; matcher and search code are identical. Before editing, the original search-test and CLI executables were preserved as `measurements/anchored-original-search.exe` and `measurements/anchored-original-cli.exe`. A second baseline, `anchored-baseline.exe`, includes the new benchmark fixtures but precedes the production optimization. `anchored-baseline-measure.exe` adds the existing opt-in `measure` harness. Candidate executables were preserved separately throughout the experiment.
+
+Retained: `matcherSingleWordSet`, one little-endian word load and a scalar loop comparing `word & probe.mask == probe.value`. Compilation selects it only after the existing exclusions and empty handling, when there are multiple probes, one table holds every probe and that table has no residual checks. The selected table is copied into `tables[0]` and its byte offset uses the existing field. Matcher size does not grow. Each probe keeps its own mask. Single-probe, cross-word, scan, character, anchored-index and dictionary paths retain their constraints; boundary/signless children may specialize without bypassing their enclosing exact/checksum logic.
+
+The original Linux EPYC/PACE screen reported 91.71 → 85.22 ns/key (+7.6%) for `donate. mirror. secure.` and 91.93 → 84.61 (+8.7%) for `donates. mirrors. secured.`. Those are screening observations, not Ryzen predictions. Here the same two workloads improve by 7.50-7.52% in longer Ryzen single-worker samples, 7.25-7.90% with the production coordinator at 16/32 workers and 8.69% in the persisted three-prefix CLI confirmation.
+
+The single-pattern concern was investigated explicitly. Pinned two-second samples show a repeatable roughly 0.09 ns/key (0.21-0.24%) cost for the controls, rather than the VM's possible 1.6%. `pace tool objdump -s searchBatch` on baseline/scalar shows the same single-probe load/mask/compare sequence, registers and stack offsets. The dispatch remains a jump table; its bound changes from 9 to 10 and surrounding code/branch targets move. This is consistent with code-layout sensitivity, not an extra single-probe matching operation; it does not establish a hardware-counter explanation. Production-loop controls at 1/16/32 workers range from -0.12% to +0.06%. We accept this small measured cost against the repeatable multi-pattern gain.
+
+### Individually compared variants and stopping decision
+
+1. **Scalar word set: accepted.** The 350 ms screen improves useful 2-63-prefix sets by 5.13-8.02%, including differing masks and shared beginnings. Twelve-character prefixes fit; thirteen-character/cross-word patterns correctly keep the general path. The 64-prefix anchored index is essentially flat. Longer samples confirm the primary three-prefix wins.
+2. **Shared mask: rejected against scalar.** A separate kind used `single.mask`, masking once before comparing values; unequal masks retained scalar matching. This avoided a new field, but the longer run gave only another 1.04% for three-prefix searches, with 1.41% all-hit and 1.63% short/mixed-dictionary regressions. Set63 gained 5.09%, insufficient to justify those regressions and larger hot code.
+3. **Explicit two/three/four comparisons: rejected against scalar.** A length switch inside the scalar case used explicit masked OR comparisons for 2/3/4 probes and the loop otherwise. Longer three-prefix gains were another 1.34-1.49%, but cross-word fallback regressed 0.68% after a 0.92% screening regression. The extra hot code was not retained. This variant was tested independently of the rejected shared-mask change.
+
+The scalar implementation already exceeds the >=3% complete-search target. No AVX2 word-set implementation, rejection index, arithmetic rewrite or dictionary project was pursued without new profiling evidence. Canonicalization remains required: its earlier roughly 4.5% VM ablation was intentionally invalid and is not an optimization candidate. Generation, candidate order, immediate match handling, reseeding, saved-key ownership/independence and persistence are unchanged.
+
+### Fixtures, machine and protocol
+
+Windows/amd64, AMD Ryzen 9 9950X3D (16 physical cores, 32 threads), PACE Go 1.27.1; compatibility checks also use stock Go 1.27.1. All performance binaries use `GOAMD64=v1`, `-pgo=off` and native dispatch capped at AVX2 with `GODEBUG=cpu.avx512f=off,cpu.avx512bw=off,cpu.avx512vl=off`. No dependencies or CPU tuning were changed.
+
+`BenchmarkAnchoredSearch` compiles patterns and creates `testPairedGenerator` before `b.Loop`. Its deterministic SHAKE stream, `state.searchBatch`, synchronous `benchmarkSave`, exact `stats.Checked == uint64(b.N)*batchSize` assertion, allocation reporting and `ns/key`/`keys/s` metrics follow the existing full-search convention. Initialization and disk I/O are excluded. `three6` is `donate. mirror. secure.`; `three7` is `donates. mirrors. secured.`. Controls are `donate.`, `privacy.` and `somethingrare.`. Selective sets contain 2, 4, 8, 16, 32, 63 or 64 deterministic ten-character prefixes. Other fixtures cover mixed lengths/masks, shared beginnings, twelve-character word edges and cross-word patterns. Existing `BenchmarkFullSearch`, `BenchmarkSuffixCosts` and `BenchmarkDictionarySearch` provide frequent/all-hit, suffix, mixed-pattern and dictionary/index regressions. The suffix fixture's existing `reseed_random` diagnostic deliberately uses OS entropy; all new anchored fixtures and the ordinary full/dictionary search fixtures use deterministic entropy.
+
+The first screen reproduces one pinned logical CPU (CPU 2, affinity mask 4), `GOMAXPROCS=1`, one-second warm-up per binary/workload, six alternating baseline/candidate pairs with reversed order on odd pairs and 350 ms per workload. Promising variants were then compared with two-second samples using the same ordering. Each change compares to the last accepted version, not to the initial baseline. The explicit-comparison confirmation hit the outer 360-second harness limit after five complete pairs because the `512` sub-benchmark regex also selected `shared512`, `mixed512` and `short512`; all five pairs are reported, with no partial or selected-out sample. Other screens/confirmations have six complete pairs. Outliers are retained.
+
+Worker validation uses the existing production coordinator, deterministic per-worker streams, spread physical-core-first pinning, a 200 ms warm-up per worker and synchronized start. Four alternating pairs use three seconds per workload at 1, 16 and 32 workers. These are process-level throughput measurements, so they should not be compared directly with the pinned batch-loop timings. Final CLI validation uses four alternating ten-second pairs at 32 workers, normal secure entropy and normal filesystem persistence. The helper sends a Windows process-group CTRL_BREAK for graceful final counters. Rates use all checked keys over elapsed time, never time-to-first-match.
+
+### Exact reproduction commands
+
+Run from the repository root. The measurement scripts are preserved under `internal/search/testdata/anchored/`; during the measurements they ran from the ignored `scripts/` directory with identical behavior. `measure-single.ps1` is the existing single-core harness. Build the baseline after adding the fixture files and before changing `pattern.go`/`pattern_compile.go`; the original binaries precede even those fixture edits. The shared/explicit binaries refer to temporary variants described above, which were removed after measurement. Logs and executables remain in the ignored `measurements/` directory; the raw per-key samples are also recorded below.
+
+```powershell
+$env:GOAMD64 = 'v1'
+$env:GODEBUG = 'cpu.avx512f=off,cpu.avx512bw=off,cpu.avx512vl=off'
+New-Item -ItemType Directory -Force measurements | Out-Null
+pace test -vet=off -pgo=off -c -o measurements/anchored-original-search.exe ./internal/search
+pace build -pgo=off -o measurements/anchored-original-cli.exe .
+# After adding fixtures, before modifying production matching:
+pace test -vet=off -pgo=off -c -o measurements/anchored-baseline.exe ./internal/search
+pace test -vet=off -pgo=off -tags measure -c -o measurements/anchored-baseline-measure.exe ./internal/search
+# Build each temporary variant at its respective revision:
+pace test -vet=off -pgo=off -c -o measurements/anchored-scalar.exe ./internal/search
+pace test -vet=off -pgo=off -c -o measurements/anchored-shared.exe ./internal/search
+pace test -vet=off -pgo=off -c -o measurements/anchored-explicit.exe ./internal/search
+# Return to retained scalar code:
+pace test -vet=off -pgo=off -tags measure -c -o measurements/anchored-scalar-measure.exe ./internal/search
+pace build -pgo=off -o measurements/anchored-scalar-cli.exe .
+
+$single = 'internal/search/testdata/anchored/measure-single.ps1'
+& $single -Baseline measurements/anchored-baseline.exe -Candidate measurements/anchored-scalar.exe -Name anchored-scalar-screen -Bench '^Benchmark(AnchoredSearch|FullSearch|SuffixCosts)$' -Time 350ms -Count 6 -Affinity 4
+& $single -Baseline measurements/anchored-baseline.exe -Candidate measurements/anchored-scalar.exe -Name anchored-scalar-confirm -Bench '^BenchmarkAnchoredSearch$/(donate|privacy|rare|three6|three7)$' -Time 2s -Count 6 -Affinity 4
+& $single -Baseline measurements/anchored-scalar.exe -Candidate measurements/anchored-shared.exe -Name anchored-shared-screen -Bench '^Benchmark(AnchoredSearch|FullSearch)$' -Time 350ms -Count 6 -Affinity 4
+& $single -Baseline measurements/anchored-scalar.exe -Candidate measurements/anchored-shared.exe -Name anchored-shared-confirm -Bench '^Benchmark(AnchoredSearch|FullSearch)$/(donate|privacy|rare|three6|three7|cross_word|set63|all_hits|short512)$' -Time 2s -Count 6 -Affinity 4
+& $single -Baseline measurements/anchored-scalar.exe -Candidate measurements/anchored-explicit.exe -Name anchored-explicit-screen -Bench '^Benchmark(AnchoredSearch|FullSearch)$' -Time 350ms -Count 6 -Affinity 4
+& $single -Baseline measurements/anchored-scalar.exe -Candidate measurements/anchored-explicit.exe -Name anchored-explicit-confirm -Bench '^Benchmark(AnchoredSearch|FullSearch)$/(donate|privacy|rare|three6|three7|cross_word|set2|set4|512)$' -Time 2s -Count 6 -Affinity 4
+& $single -Baseline measurements/anchored-baseline.exe -Candidate measurements/anchored-scalar.exe -Name anchored-dictionary-screen -Bench '^BenchmarkDictionarySearch$' -Time 350ms -Count 6 -Affinity 4
+
+& internal/search/testdata/anchored/measure-workers.ps1 -Workers '16,32' -Name anchored-workers-many -Pairs 4
+& internal/search/testdata/anchored/measure-workers.ps1 -Workers '1' -Name anchored-workers-one -Pairs 4
+go build -pgo=off -o measurements/anchored-cli-runner.exe internal/search/testdata/anchored/measure-cli_windows.go
+& measurements/anchored-cli-runner.exe
+# The helper executes both baseline and scalar, four alternating pairs:
+# <binary> --cpu 32 --output measurements/anchored-cli-<pair>-<side>-matches donate. mirror. secure.
+
+pace tool objdump -s searchBatch measurements/anchored-baseline.exe
+pace tool objdump -s searchBatch measurements/anchored-scalar.exe
+pace test -vet=off -pgo=off ./...
+pace test -vet=off -pgo=off -tags purego ./...
+go test -vet=off -pgo=off ./...
+go test -vet=off -pgo=off -tags purego ./...
+vet --os windows
+vet --os linux
+vet --os darwin
+vet --tests --tags purego --os windows ./...
+vet --tests --tags measure --os windows ./...
+vet --os windows ./internal/search/testdata/anchored
+```
+
+### Correctness and allocation results
+
+All four full test suites passed: PACE/stock Go, native/`purego`, with `-vet=off -pgo=off`. Only custom `vet` was used; Windows, Linux and Darwin checks passed, as did Windows `purego` and `measure` checks. Initial house-rule blank-line diagnostics in the new tests were corrected before the successful runs.
+
+`TestWordSetsAgainstStrings` checks independent visible-base32/string references, constructed positive matches, every single-bit mutation, random inputs, duplicates, shared beginnings, differing lengths/masks, cross-word, combined-anchor and suffix patterns, plus scan/character/dictionary mixtures. Counts span 2-64. Both scalar and available native compiler backends are exercised. The independent sign-filter oracle enumerates both signs and all checksum nibbles. Visible suffix/checksum wrappers and their signless children are covered. `TestWordSetOffsets` asserts specialization and checks independent base32 substrings at all four word offsets, including differing masks. Existing search tests continue to cover candidate accounting, immediate saves, reseeding and saved-key independence.
+
+All 1,450 recorded batch-search benchmark samples below report **0 B/op, 0 allocs/op**, including the existing reseed/save regressions. `testing.AllocsPerRun` also confirms zero Match allocations. The separate process-level worker harness includes bounded startup-release/cancellation bookkeeping in its MemStats window: 2-3 allocations/136-616 bytes for one worker, 17-19/496-992 for 16 and 33-35/880-1392 for 32. Those are totals per run, not per-key steady-state allocations. CLI persistence naturally allocates and performs disk I/O; it is reported separately.
+
+### Raw single-worker results
+
+Each raw list is in pair order. Units are ns/key; summary columns are median [minimum-maximum]. Throughput change is `100 * (before median / after median - 1)`. `A`, `F`, `S` and `D` abbreviate `BenchmarkAnchoredSearch`, `BenchmarkFullSearch`, `BenchmarkSuffixCosts` and `BenchmarkDictionarySearch`. The preserved text logs also contain iteration counts, ns/op, keys/s and allocation columns. Every batch-search sample checks its exact candidate count internally.
+
+#### Scalar screen: baseline → scalar, 350 ms x six pairs
+
+| Workload | Before raw | After raw | Before median [range] | After median [range] | Throughput |
+| --- | --- | --- | ---: | ---: | ---: |
+| A/donate | 39.7, 39.5, 39.5, 39.52, 39.5, 39.52 | 39.59, 39.6, 39.58, 39.59, 39.6, 39.61 | 39.510 [39.5-39.7] | 39.595 [39.58-39.61] | -0.21% |
+| A/privacy | 39.67, 39.49, 39.49, 39.5, 39.51, 39.51 | 39.58, 39.59, 39.58, 39.59, 39.61, 39.59 | 39.505 [39.49-39.67] | 39.590 [39.58-39.61] | -0.21% |
+| A/rare | 39.66, 39.51, 39.53, 39.51, 39.52, 39.51 | 39.64, 39.62, 39.59, 39.6, 39.6, 39.58 | 39.515 [39.51-39.66] | 39.600 [39.58-39.64] | -0.21% |
+| A/three6 | 43.66, 43.48, 43.67, 43.44, 43.66, 43.63 | 40.44, 40.82, 40.4, 40.41, 40.39, 40.39 | 43.645 [43.44-43.67] | 40.405 [40.39-40.82] | 8.02% |
+| A/three7 | 43.92, 43.56, 43.71, 43.45, 43.74, 43.43 | 40.43, 40.51, 40.48, 40.42, 40.48, 40.41 | 43.635 [43.43-43.92] | 40.455 [40.41-40.51] | 7.86% |
+| A/mixed_lengths | 43.9, 43.44, 43.49, 43.48, 43.73, 43.31 | 40.4, 40.41, 40.36, 40.44, 40.41, 40.54 | 43.485 [43.31-43.9] | 40.410 [40.36-40.54] | 7.61% |
+| A/shared | 43.93, 43.6, 43.68, 43.62, 43.63, 43.64 | 40.64, 40.61, 40.58, 40.6, 40.57, 40.57 | 43.635 [43.6-43.93] | 40.590 [40.57-40.64] | 7.50% |
+| A/word_edge | 44.35, 43.92, 44.04, 43.97, 44.01, 43.95 | 41.48, 40.92, 40.89, 41.06, 40.94, 40.85 | 43.990 [43.92-44.35] | 40.930 [40.85-41.48] | 7.48% |
+| A/cross_word | 44.36, 43.92, 43.96, 43.83, 43.88, 44.17 | 45.28, 43.8, 43.92, 43.89, 43.98, 43.74 | 43.940 [43.83-44.36] | 43.905 [43.74-45.28] | 0.08% |
+| A/set2 | 43.87, 43.39, 43.47, 43.5, 43.55, 43.47 | 41.32, 40.87, 40.66, 40.66, 40.69, 40.77 | 43.485 [43.39-43.87] | 40.730 [40.66-41.32] | 6.76% |
+| A/set4 | 44.49, 44.17, 44.23, 43.91, 44.07, 44.05 | 42.99, 41.03, 41.02, 41.06, 41.16, 40.95 | 44.120 [43.91-44.49] | 41.045 [40.95-42.99] | 7.49% |
+| A/set8 | 45.11, 44.69, 44.8, 44.84, 44.79, 44.95 | 42.21, 41.99, 42.06, 42.02, 41.89, 41.81 | 44.820 [44.69-45.11] | 42.005 [41.81-42.21] | 6.70% |
+| A/set16 | 47.07, 46.45, 46.51, 46.68, 46.6, 46.7 | 43.79, 48.1, 43.81, 43.79, 43.79, 43.68 | 46.640 [46.45-47.07] | 43.790 [43.68-48.1] | 6.51% |
+| A/set32 | 50.88, 50.16, 50.23, 50.24, 50.2, 50.18 | 47.56, 52.76, 47.59, 47.38, 47.62, 47.46 | 50.215 [50.16-50.88] | 47.575 [47.38-52.76] | 5.55% |
+| A/set63 | 57.54, 57.31, 57.16, 59, 57.24, 57.25 | 54.65, 54.57, 54.4, 54.74, 54.24, 54.33 | 57.280 [57.16-59] | 54.485 [54.24-54.74] | 5.13% |
+| A/set64 | 44.41, 42.17, 42.17, 42.05, 42.12, 42.05 | 42.25, 42.09, 42.15, 42.05, 42.09, 42.01 | 42.145 [42.05-44.41] | 42.090 [42.01-42.25] | 0.13% |
+| F/rare | 41.63, 39.91, 40.12, 40.02, 40.15, 39.87 | 40.14, 40.07, 40.02, 39.94, 40.16, 40.16 | 40.070 [39.87-41.63] | 40.105 [39.94-40.16] | -0.09% |
+| F/frequent | 50.6, 49.57, 49.44, 49.41, 49.49, 49.36 | 49.27, 49.56, 49.26, 49.22, 49.38, 49.25 | 49.465 [49.36-50.6] | 49.265 [49.22-49.56] | 0.41% |
+| F/all_hits | 8100, 8250, 7880, 7939, 7872, 7906 | 7823, 7880, 8001, 7863, 7853, 7837 | 7922.500 [7872-8250] | 7858.000 [7823-8001] | 0.82% |
+| F/512 | 66.22, 68.48, 65.07, 65.11, 65.08, 64.86 | 64.78, 64.75, 64.94, 64.51, 64.72, 64.85 | 65.095 [64.86-68.48] | 64.765 [64.51-64.94] | 0.51% |
+| F/shared512 | 66.54, 78.65, 64.78, 64.57, 64.52, 64.58 | 64.22, 64.24, 64.3, 64.56, 64.77, 64.36 | 64.680 [64.52-78.65] | 64.330 [64.22-64.77] | 0.54% |
+| F/mixed512 | 70.81, 69.18, 68.13, 67.96, 68.29, 68.01 | 67.8, 67.71, 68, 67.84, 68, 67.75 | 68.210 [67.96-70.81] | 67.820 [67.71-68] | 0.58% |
+| F/short512 | 512.5, 492.3, 491.3, 494, 494.6, 493.2 | 491.3, 489.7, 491.3, 491.6, 491.2, 490.7 | 493.600 [491.3-512.5] | 491.250 [489.7-491.6] | 0.48% |
+| S/rare_prefix/matching_only | 41.25, 39.99, 39.99, 39.99, 40.04, 40.07 | 39.89, 40.16, 40, 39.91, 40.2, 39.84 | 40.015 [39.99-41.25] | 39.955 [39.84-40.2] | 0.15% |
+| S/rare_prefix/reseed_shake | 41.4, 39.95, 40.03, 40.03, 39.99, 39.95 | 39.97, 39.95, 40.09, 40.13, 40.01, 39.97 | 40.010 [39.95-41.4] | 39.990 [39.95-40.13] | 0.05% |
+| S/rare_prefix/reseed_random | 42.1, 40.02, 39.96, 39.93, 39.9, 40.03 | 40.03, 40, 40.53, 39.93, 39.95, 40.11 | 39.990 [39.9-42.1] | 40.015 [39.93-40.53] | -0.06% |
+| S/prefix1/matching_only | 84.52, 83.1, 82.85, 82.62, 82.88, 82.91 | 83.11, 83.31, 83.06, 83.02, 82.98, 83.19 | 82.895 [82.62-84.52] | 83.085 [82.98-83.31] | -0.23% |
+| S/prefix1/reseed_shake | 339.2, 330.7, 330.2, 329.1, 330.4, 330 | 328.4, 329, 329.8, 328.4, 328.5, 329 | 330.300 [329.1-339.2] | 328.750 [328.4-329.8] | 0.47% |
+| S/prefix1/reseed_random | 339.4, 328.4, 329.9, 328.4, 328.1, 331.3 | 327.6, 326.3, 326.5, 327.2, 328.1, 325.8 | 329.150 [328.1-339.4] | 326.850 [325.8-328.1] | 0.70% |
+| S/suffix1/matching_only | 223.4, 220.7, 220.9, 220.6, 220.5, 220.4 | 220.7, 220.7, 220.4, 221.1, 220.3, 220.3 | 220.650 [220.4-223.4] | 220.550 [220.3-221.1] | 0.05% |
+| S/suffix1/reseed_shake | 481, 466.3, 465.9, 465.4, 465.9, 464.3 | 462.1, 463.3, 461.3, 462.2, 465.4, 461.5 | 465.900 [464.3-481] | 462.150 [461.3-465.4] | 0.81% |
+| S/suffix1/reseed_random | 481, 465.6, 467, 468.9, 468.2, 467.1 | 465, 462.3, 466, 463.1, 463.7, 463.5 | 467.650 [465.6-481] | 463.600 [462.3-466] | 0.87% |
+| S/suffix2/matching_only | 47.1, 45.49, 45.49, 45.39, 45.41, 45.4 | 45.03, 45.05, 45.13, 45.04, 44.96, 45.01 | 45.450 [45.39-47.1] | 45.035 [44.96-45.13] | 0.92% |
+| S/suffix2/reseed_shake | 55.6, 54.8, 55.04, 54.91, 54.8, 54.75 | 54.56, 54.96, 55.99, 54.29, 54.35, 54.38 | 54.855 [54.75-55.6] | 54.470 [54.29-55.99] | 0.71% |
+| S/suffix2/reseed_random | 56.15, 54.89, 55.01, 54.66, 55, 54.99 | 54.51, 54.55, 70.12, 54.74, 54.62, 54.75 | 54.995 [54.66-56.15] | 54.680 [54.51-70.12] | 0.58% |
+| S/suffix3/matching_only | 41.81, 40.22, 40.18, 40.24, 40.34, 40.22 | 40.15, 40.18, 44.37, 40.16, 40.15, 40.23 | 40.230 [40.18-41.81] | 40.170 [40.15-44.37] | 0.15% |
+| S/suffix3/reseed_shake | 41.2, 40.7, 40.45, 40.64, 40.58, 40.44 | 40.61, 40.58, 40.57, 40.56, 40.45, 40.54 | 40.610 [40.44-41.2] | 40.565 [40.45-40.61] | 0.11% |
+| S/suffix3/reseed_random | 42.21, 40.59, 40.49, 40.52, 40.55, 40.61 | 40.44, 40.58, 40.88, 40.58, 40.54, 40.48 | 40.570 [40.49-42.21] | 40.560 [40.44-40.88] | 0.02% |
+| S/suffix4/matching_only | 41.57, 40.1, 40.04, 40.01, 40.2, 40.02 | 39.9, 40.09, 39.91, 39.98, 39.98, 39.9 | 40.070 [40.01-41.57] | 39.945 [39.9-40.09] | 0.31% |
+| S/suffix4/reseed_shake | 41.24, 40, 40.05, 40.02, 40.03, 39.9 | 40.02, 40.01, 40.13, 40.3, 40.04, 40.04 | 40.025 [39.9-41.24] | 40.040 [40.01-40.3] | -0.04% |
+| S/suffix4/reseed_random | 42.96, 40.03, 40.29, 39.97, 39.93, 40 | 40.13, 40, 40.06, 39.99, 40.07, 40.13 | 40.015 [39.93-42.96] | 40.065 [39.99-40.13] | -0.12% |
+
+#### Scalar confirmation: baseline → scalar, two seconds x six pairs
+
+| Workload | Before raw | After raw | Before median [range] | After median [range] | Throughput |
+| --- | --- | --- | ---: | ---: | ---: |
+| A/donate | 39.5, 39.49, 39.51, 39.55, 39.52, 39.52 | 39.6, 39.6, 39.6, 39.61, 39.61, 39.61 | 39.515 [39.49-39.55] | 39.605 [39.6-39.61] | -0.23% |
+| A/privacy | 39.83, 39.86, 39.82, 40.75, 40.83, 39.82 | 39.94, 39.91, 39.94, 39.93, 39.97, 39.95 | 39.845 [39.82-40.83] | 39.940 [39.91-39.97] | -0.24% |
+| A/rare | 39.94, 39.94, 39.99, 41.17, 40.1, 39.98 | 40.06, 40.08, 40.04, 40.08, 40.16, 40.03 | 39.985 [39.94-41.17] | 40.070 [40.03-40.16] | -0.21% |
+| A/three6 | 44.15, 43.9, 43.99, 45.25, 44.04, 43.96 | 40.97, 40.94, 40.89, 41.62, 40.93, 40.85 | 44.015 [43.9-45.25] | 40.935 [40.85-41.62] | 7.52% |
+| A/three7 | 44.02, 44.05, 43.96, 44.88, 43.99, 44.01 | 41.66, 40.92, 40.9, 42.03, 40.97, 40.84 | 44.015 [43.96-44.88] | 40.945 [40.84-42.03] | 7.50% |
+
+#### Dictionary regression screen: baseline → scalar, 350 ms x six pairs
+
+| Workload | Before raw | After raw | Before median [range] | After median [range] | Throughput |
+| --- | --- | --- | ---: | ---: | ---: |
+| D/prefix/64 | 41.65, 41.69, 41.67, 41.65, 41.64, 41.67 | 41.71, 41.67, 41.67, 41.72, 41.64, 41.66 | 41.660 [41.64-41.69] | 41.670 [41.64-41.72] | -0.02% |
+| D/prefix/512 | 41.83, 41.84, 41.85, 41.8, 41.78, 41.81 | 41.85, 41.82, 41.8, 41.81, 41.81, 41.83 | 41.820 [41.78-41.85] | 41.815 [41.8-41.85] | 0.01% |
+| D/suffix/64 | 41.65, 41.67, 41.66, 41.62, 41.62, 41.64 | 41.67, 41.69, 41.62, 41.64, 41.68, 41.64 | 41.645 [41.62-41.67] | 41.655 [41.62-41.69] | -0.02% |
+| D/suffix/512 | 41.8, 41.8, 41.79, 41.79, 41.79, 41.81 | 41.87, 41.84, 41.8, 41.87, 41.8, 41.81 | 41.795 [41.79-41.81] | 41.825 [41.8-41.87] | -0.07% |
+| D/combined/64 | 41.65, 41.68, 41.64, 41.63, 41.64, 41.65 | 41.64, 41.33, 41.65, 41.67, 41.65, 41.65 | 41.645 [41.63-41.68] | 41.650 [41.33-41.67] | -0.01% |
+| D/combined/512 | 41.79, 41.79, 41.8, 41.77, 41.8, 41.8 | 41.85, 41.43, 41.82, 41.84, 41.83, 41.83 | 41.795 [41.77-41.8] | 41.830 [41.43-41.85] | -0.08% |
+| D/long/64 | 55.86, 55.77, 55.75, 55.71, 55.8, 55.72 | 55.57, 55.6, 55.54, 55.48, 55.54, 55.54 | 55.760 [55.71-55.86] | 55.540 [55.48-55.6] | 0.40% |
+| D/long/512 | 63.18, 63.05, 62.97, 63.21, 62.96, 63.29 | 62.79, 62.88, 62.73, 62.76, 62.73, 62.8 | 63.115 [62.96-63.29] | 62.775 [62.73-62.88] | 0.54% |
+
+#### Shared-mask screen: scalar → shared, 350 ms x six pairs
+
+| Workload | Before raw | After raw | Before median [range] | After median [range] | Throughput |
+| --- | --- | --- | ---: | ---: | ---: |
+| A/donate | 39.59, 39.59, 39.59, 39.59, 39.59, 39.63 | 39.5, 39.52, 39.5, 39.5, 39.49, 39.51 | 39.590 [39.59-39.63] | 39.500 [39.49-39.52] | 0.23% |
+| A/privacy | 39.61, 39.59, 39.59, 39.59, 39.63, 39.63 | 39.51, 39.51, 39.49, 39.5, 39.46, 39.46 | 39.600 [39.59-39.63] | 39.495 [39.46-39.51] | 0.27% |
+| A/rare | 39.6, 39.58, 39.61, 39.57, 39.6, 39.6 | 39.49, 39.51, 39.49, 39.47, 39.51, 39.5 | 39.600 [39.57-39.61] | 39.495 [39.47-39.51] | 0.27% |
+| A/three6 | 40.39, 40.4, 40.41, 40.48, 40.53, 40.49 | 39.97, 40.25, 39.97, 39.99, 39.98, 39.98 | 40.445 [40.39-40.53] | 39.980 [39.97-40.25] | 1.16% |
+| A/three7 | 40.38, 40.39, 40.41, 40.5, 40.49, 40.38 | 40, 39.96, 39.97, 40, 40, 40.02 | 40.400 [40.38-40.5] | 40.000 [39.96-40.02] | 1.00% |
+| A/mixed_lengths | 40.41, 40.4, 40.48, 40.37, 40.54, 40.39 | 40.22, 40.22, 40.26, 40.25, 40.4, 40.25 | 40.405 [40.37-40.54] | 40.250 [40.22-40.4] | 0.39% |
+| A/shared | 40.59, 40.58, 40.58, 40.58, 40.59, 40.59 | 40.1, 40.31, 40.16, 40.3, 40.14, 40.14 | 40.585 [40.58-40.59] | 40.150 [40.1-40.31] | 1.08% |
+| A/word_edge | 40.79, 41.27, 40.9, 40.84, 40.86, 41.1 | 40.52, 40.67, 40.58, 40.43, 40.39, 40.59 | 40.880 [40.79-41.27] | 40.550 [40.39-40.67] | 0.81% |
+| A/cross_word | 43.81, 43.81, 43.94, 44.26, 43.91, 43.87 | 43.85, 44.14, 44.08, 44.17, 44.05, 43.98 | 43.890 [43.81-44.26] | 44.065 [43.85-44.17] | -0.40% |
+| A/set2 | 40.77, 40.92, 40.72, 40.6, 40.81, 40.78 | 40.41, 40.19, 40.83, 40.35, 40.38, 40.41 | 40.775 [40.6-40.92] | 40.395 [40.19-40.83] | 0.94% |
+| A/set4 | 41.09, 41.23, 41.07, 41.11, 41.22, 41.3 | 40.55, 40.58, 40.78, 40.6, 40.72, 40.6 | 41.165 [41.07-41.3] | 40.600 [40.55-40.78] | 1.39% |
+| A/set8 | 41.95, 41.92, 41.98, 42.09, 42.06, 42.11 | 41.46, 41.78, 41.47, 41.3, 41.41, 41.62 | 42.020 [41.92-42.11] | 41.465 [41.3-41.78] | 1.34% |
+| A/set16 | 43.75, 43.98, 43.83, 43.78, 43.69, 43.84 | 43.06, 42.9, 42.96, 42.92, 43.53, 43.01 | 43.805 [43.69-43.98] | 42.985 [42.9-43.53] | 1.91% |
+| A/set32 | 47.46, 47.68, 47.59, 47.44, 47.6, 47.75 | 46.08, 46.18, 46.01, 46.25, 46.37, 46.5 | 47.595 [47.44-47.75] | 46.215 [46.01-46.5] | 2.99% |
+| A/set63 | 54.75, 54.48, 55.01, 54.88, 54.52, 54.76 | 51.91, 51.82, 52.02, 51.91, 52.08, 51.93 | 54.755 [54.48-55.01] | 51.920 [51.82-52.08] | 5.46% |
+| A/set64 | 42.05, 42.27, 42.21, 42.38, 42.2, 42.32 | 42.11, 42.16, 42.5, 42.43, 42.18, 42.23 | 42.240 [42.05-42.38] | 42.205 [42.11-42.5] | 0.08% |
+| F/rare | 39.98, 40.08, 40.09, 40.09, 40.1, 40.23 | 39.99, 39.95, 40.05, 39.88, 39.97, 40.07 | 40.090 [39.98-40.23] | 39.980 [39.88-40.07] | 0.28% |
+| F/frequent | 49.18, 49.41, 49.28, 49.52, 49.37, 49.63 | 49.44, 49.43, 49.29, 49.45, 49.29, 49.73 | 49.390 [49.18-49.63] | 49.435 [49.29-49.73] | -0.09% |
+| F/all_hits | 7877, 7882, 7883, 7859, 7854, 7896 | 7972, 7985, 7999, 7961, 7994, 8003 | 7879.500 [7854-7896] | 7989.500 [7961-8003] | -1.38% |
+| F/512 | 64.91, 64.97, 64.95, 64.77, 64.94, 64.92 | 64.71, 64.96, 71.35, 64.97, 65.12, 65.21 | 64.930 [64.77-64.97] | 65.045 [64.71-71.35] | -0.18% |
+| F/shared512 | 64.77, 64.64, 64.58, 64.38, 64.52, 64.64 | 64.42, 64.53, 71.94, 64.58, 64.46, 64.87 | 64.610 [64.38-64.77] | 64.555 [64.42-71.94] | 0.09% |
+| F/mixed512 | 68.06, 68.13, 67.97, 67.81, 68.04, 68.1 | 67.91, 68.12, 68.24, 68.39, 68.16, 68.34 | 68.050 [67.81-68.13] | 68.200 [67.91-68.39] | -0.22% |
+| F/short512 | 492, 491.1, 494.7, 492.4, 491.8, 492.5 | 497, 498, 500.5, 498.1, 499.5, 499.2 | 492.200 [491.1-494.7] | 498.650 [497-500.5] | -1.29% |
+
+#### Shared-mask confirmation: scalar → shared, two seconds x six pairs
+
+| Workload | Before raw | After raw | Before median [range] | After median [range] | Throughput |
+| --- | --- | --- | ---: | ---: | ---: |
+| A/donate | 39.6, 39.58, 39.6, 39.59, 39.59, 39.59 | 39.5, 39.51, 39.51, 39.49, 39.49, 39.49 | 39.590 [39.58-39.6] | 39.495 [39.49-39.51] | 0.24% |
+| A/privacy | 40.04, 40.07, 40.11, 40.12, 39.92, 39.95 | 42.03, 39.96, 40.07, 41.84, 39.81, 39.79 | 40.055 [39.92-40.12] | 40.015 [39.79-42.03] | 0.10% |
+| A/rare | 40.2, 40.24, 40.64, 40.33, 40.01, 41.25 | 40.17, 40.36, 40.3, 40.23, 39.95, 39.91 | 40.285 [40.01-41.25] | 40.200 [39.91-40.36] | 0.21% |
+| A/three6 | 41.17, 41.12, 41.12, 41.15, 40.87, 40.91 | 40.68, 41.78, 40.71, 40.76, 40.43, 40.36 | 41.120 [40.87-41.17] | 40.695 [40.36-41.78] | 1.04% |
+| A/three7 | 41.09, 41.15, 41.19, 41.22, 40.83, 40.99 | 40.61, 41.25, 40.78, 40.79, 40.42, 40.39 | 41.120 [40.83-41.22] | 40.695 [40.39-41.25] | 1.04% |
+| A/cross_word | 44.05, 44.06, 44.14, 44.24, 43.8, 43.86 | 44.05, 45.18, 44.26, 44.26, 43.72, 43.8 | 44.055 [43.8-44.24] | 44.155 [43.72-45.18] | -0.23% |
+| A/set63 | 54.74, 60.7, 55.03, 55.09, 54.36, 54.42 | 52.27, 53.35, 52.18, 52.34, 51.96, 51.9 | 54.885 [54.36-60.7] | 52.225 [51.9-53.35] | 5.09% |
+| F/rare | 40.23, 40.77, 40.33, 40.45, 40.08, 40.09 | 40.06, 40.86, 40.22, 40.28, 40.09, 39.91 | 40.280 [40.08-40.77] | 40.155 [39.91-40.86] | 0.31% |
+| F/all_hits | 7909, 8203, 7941, 7910, 7863, 7854 | 8014, 8239, 8050, 8031, 7973, 7968 | 7909.500 [7854-8203] | 8022.500 [7968-8239] | -1.41% |
+| F/short512 | 501.7, 497.8, 497.8, 494, 494.4, 495.9 | 505.2, 511, 506.3, 505, 500.7, 500.6 | 496.850 [494-501.7] | 505.100 [500.6-511] | -1.63% |
+
+#### Explicit-comparison screen: scalar → explicit, 350 ms x six pairs
+
+| Workload | Before raw | After raw | Before median [range] | After median [range] | Throughput |
+| --- | --- | --- | ---: | ---: | ---: |
+| A/donate | 39.59, 39.59, 39.6, 39.59, 39.6, 39.6 | 39.47, 39.52, 39.51, 39.5, 39.52, 39.5 | 39.595 [39.59-39.6] | 39.505 [39.47-39.52] | 0.23% |
+| A/privacy | 39.59, 39.6, 39.61, 39.61, 39.59, 39.64 | 39.48, 39.49, 39.5, 39.52, 39.5, 39.5 | 39.605 [39.59-39.64] | 39.500 [39.48-39.52] | 0.27% |
+| A/rare | 39.59, 39.58, 39.58, 39.55, 39.61, 39.63 | 39.51, 39.48, 39.51, 39.55, 39.51, 39.48 | 39.585 [39.55-39.63] | 39.510 [39.48-39.55] | 0.19% |
+| A/three6 | 40.39, 40.38, 40.42, 40.38, 40.38, 40.48 | 39.87, 39.89, 39.9, 39.93, 39.9, 39.89 | 40.385 [40.38-40.48] | 39.895 [39.87-39.93] | 1.23% |
+| A/three7 | 40.39, 40.37, 40.4, 40.39, 40.41, 40.41 | 39.89, 39.88, 39.91, 39.93, 39.89, 39.89 | 40.395 [40.37-40.41] | 39.890 [39.88-39.93] | 1.27% |
+| A/mixed_lengths | 40.54, 40.37, 40.41, 40.37, 40.52, 40.42 | 39.88, 39.89, 39.9, 39.91, 39.9, 39.9 | 40.415 [40.37-40.54] | 39.900 [39.88-39.91] | 1.29% |
+| A/shared | 40.85, 40.58, 40.62, 40.57, 40.59, 40.55 | 40.05, 40.07, 40.07, 40.11, 40.06, 40.07 | 40.585 [40.55-40.85] | 40.070 [40.05-40.11] | 1.29% |
+| A/word_edge | 40.86, 40.95, 40.93, 40.87, 40.91, 40.92 | 40.31, 40.26, 40.24, 40.37, 40.35, 40.35 | 40.915 [40.86-40.95] | 40.330 [40.24-40.37] | 1.45% |
+| A/cross_word | 43.97, 43.74, 43.71, 43.75, 43.8, 43.9 | 44.1, 44.28, 44.11, 44.25, 44.05, 44.3 | 43.775 [43.71-43.97] | 44.180 [44.05-44.3] | -0.92% |
+| A/set2 | 40.61, 40.65, 40.75, 40.53, 40.55, 40.79 | 40.1, 40.23, 40.33, 40.18, 40.17, 40.1 | 40.630 [40.53-40.79] | 40.175 [40.1-40.33] | 1.13% |
+| A/set4 | 40.95, 41.13, 41, 40.97, 40.96, 41.16 | 40.43, 40.61, 40.56, 40.51, 40.47, 40.55 | 40.985 [40.95-41.16] | 40.530 [40.43-40.61] | 1.12% |
+| A/set8 | 42.01, 41.95, 42.13, 41.8, 42.01, 42.01 | 42.11, 42.04, 42.04, 42.02, 42, 41.97 | 42.010 [41.8-42.13] | 42.030 [41.97-42.11] | -0.05% |
+| A/set16 | 43.74, 43.73, 43.79, 43.88, 43.7, 43.81 | 43.84, 43.78, 43.74, 43.98, 43.73, 43.74 | 43.765 [43.7-43.88] | 43.760 [43.73-43.98] | 0.01% |
+| A/set32 | 47.48, 47.5, 47.4, 47.31, 47.45, 47.59 | 47.43, 47.37, 47.5, 47.39, 47.29, 55.95 | 47.465 [47.31-47.59] | 47.410 [47.29-55.95] | 0.12% |
+| A/set63 | 54.33, 54.57, 54.55, 54.67, 54.64, 54.65 | 54.09, 54.01, 54.16, 54.29, 54.16, 63.72 | 54.605 [54.33-54.67] | 54.160 [54.01-63.72] | 0.82% |
+| A/set64 | 42.24, 42.09, 42.44, 42.08, 42.06, 42.16 | 42.15, 42.23, 42.34, 42.14, 42.19, 42.18 | 42.125 [42.06-42.44] | 42.185 [42.14-42.34] | -0.14% |
+| F/rare | 40.15, 40.15, 40.04, 39.94, 40.05, 40.22 | 39.95, 39.88, 39.95, 40.03, 39.96, 39.94 | 40.100 [39.94-40.22] | 39.950 [39.88-40.03] | 0.38% |
+| F/frequent | 49.23, 49.15, 49.56, 49.21, 49.21, 49.26 | 49.17, 49.14, 49.25, 49.18, 49.35, 49.11 | 49.220 [49.15-49.56] | 49.175 [49.11-49.35] | 0.09% |
+| F/all_hits | 7875, 7848, 7853, 7844, 7848, 7868 | 7850, 7856, 7897, 7905, 7851, 7863 | 7850.500 [7844-7875] | 7859.500 [7850-7905] | -0.11% |
+| F/512 | 65.15, 64.68, 64.7, 64.78, 64.6, 64.74 | 64.2, 64.1, 64.16, 64.03, 63.89, 63.7 | 64.720 [64.6-65.15] | 64.065 [63.7-64.2] | 1.02% |
+| F/shared512 | 64.44, 64.65, 64.31, 64.44, 64.59, 64.37 | 63.55, 63.71, 63.72, 63.76, 63.27, 63.47 | 64.440 [64.31-64.65] | 63.630 [63.27-63.76] | 1.27% |
+| F/mixed512 | 67.97, 67.65, 68.22, 67.72, 68.02, 68.13 | 67.31, 67.57, 67.33, 68.01, 67.03, 66.92 | 67.995 [67.65-68.22] | 67.320 [66.92-68.01] | 1.00% |
+| F/short512 | 491.9, 491.1, 490, 490.4, 492.2, 492.2 | 492.5, 493.5, 493.3, 492.3, 491.8, 491.4 | 491.500 [490-492.2] | 492.400 [491.4-493.5] | -0.18% |
+
+#### Explicit-comparison confirmation: scalar → explicit, two seconds x five complete pairs
+
+| Workload | Before raw | After raw | Before median [range] | After median [range] | Throughput |
+| --- | --- | --- | ---: | ---: | ---: |
+| A/donate | 39.59, 39.59, 39.64, 39.61, 39.58 | 39.5, 39.5, 39.49, 39.48, 39.51 | 39.590 [39.58-39.64] | 39.500 [39.48-39.51] | 0.23% |
+| A/privacy | 39.93, 39.93, 39.99, 40.31, 39.97 | 39.84, 39.84, 39.86, 39.81, 39.88 | 39.970 [39.93-40.31] | 39.840 [39.81-39.88] | 0.33% |
+| A/rare | 40.04, 40.1, 40.11, 40.32, 40.03 | 39.99, 39.94, 40.02, 39.95, 40.03 | 40.100 [40.03-40.32] | 39.990 [39.94-40.03] | 0.28% |
+| A/three6 | 40.92, 40.95, 40.95, 42.4, 40.86 | 40.42, 40.32, 40.36, 40.41, 40.48 | 40.950 [40.86-42.4] | 40.410 [40.32-40.48] | 1.34% |
+| A/three7 | 40.98, 40.87, 40.95, 42.39, 40.92 | 40.39, 40.32, 40.35, 40.33, 40.68 | 40.950 [40.87-42.39] | 40.350 [40.32-40.68] | 1.49% |
+| A/cross_word | 44.01, 43.81, 43.88, 43.88, 43.95 | 44.18, 44.15, 44.14, 44.18, 44.19 | 43.880 [43.81-44.01] | 44.180 [44.14-44.19] | -0.68% |
+| A/set2 | 40.72, 40.65, 40.62, 40.74, 40.69 | 40.2, 40.13, 40.23, 40.33, 40.29 | 40.690 [40.62-40.74] | 40.230 [40.13-40.33] | 1.14% |
+| A/set4 | 41.07, 41.1, 41.24, 41.09, 41.18 | 40.56, 40.55, 40.49, 40.59, 40.64 | 41.100 [41.07-41.24] | 40.560 [40.49-40.64] | 1.33% |
+| F/rare | 40.06, 40.91, 40.07, 40.03, 40.07 | 39.97, 40.04, 39.97, 40.25, 39.97 | 40.070 [40.03-40.91] | 39.970 [39.97-40.25] | 0.25% |
+| F/512 | 65.26, 67, 64.98, 64.95, 64.92 | 64.03, 63.95, 67.68, 66.91, 63.95 | 64.980 [64.92-67] | 64.030 [63.95-67.68] | 1.48% |
+| F/shared512 | 64.58, 66.16, 64.55, 64.5, 64.67 | 63.65, 63.57, 63.54, 63.74, 63.47 | 64.580 [64.5-66.16] | 63.570 [63.47-63.74] | 1.59% |
+| F/mixed512 | 68.16, 69.72, 68.08, 69.42, 67.99 | 69.48, 67.21, 67.21, 67.28, 67.46 | 68.160 [67.99-69.72] | 67.280 [67.21-69.48] | 1.31% |
+| F/short512 | 495, 507.5, 494.8, 495.5, 495.1 | 495.3, 494.4, 494.9, 496.3, 496.9 | 495.100 [494.8-507.5] | 495.300 [494.4-496.9] | -0.04% |
+
+### Raw worker validation: baseline → scalar
+
+Units are millions of checked keys/second; raw rates are rounded to six decimals. Four alternating pairs, three seconds each, with all samples retained. Summaries are median [minimum-maximum]; throughput change is the ratio of median rates. Original `anchored-workers-{one,many}-<pair>-{before,after}.txt` logs contain full-precision MEASURE JSON with exact Checked, Saved, elapsed Seconds, allocation totals and CPU placements. Spread placement uses logical CPU 0 for one worker; 16 uses `0,16,2,18,4,20,6,22,8,24,10,26,12,28,14,30`; 32 additionally uses their odd-numbered SMT siblings in that order.
+
+| Workload/workers | Before raw Mkeys/s | After raw Mkeys/s | Before median [range] | After median [range] | Throughput |
+| --- | --- | --- | ---: | ---: | ---: |
+| donate/1 | 23.668582, 23.652045, 23.669837, 23.656928 | 23.640296, 23.661251, 23.659480, 23.651491 | 23.663 [23.652-23.670] | 23.655 [23.640-23.661] | -0.03% |
+| privacy/1 | 23.611589, 23.575808, 23.599045, 23.581442 | 23.582085, 23.601159, 23.560887, 23.596369 | 23.590 [23.576-23.612] | 23.589 [23.561-23.601] | -0.00% |
+| rare/1 | 23.591708, 23.577882, 23.614191, 23.583834 | 23.605734, 23.595307, 23.619526, 23.599905 | 23.588 [23.578-23.614] | 23.603 [23.595-23.620] | 0.06% |
+| three6/1 | 21.572584, 21.536729, 21.571862, 21.521293 | 23.127461, 23.129463, 23.137178, 23.119387 | 21.554 [21.521-21.573] | 23.128 [23.119-23.137] | 7.30% |
+| three7/1 | 21.550953, 21.536653, 21.568860, 21.545562 | 23.100942, 23.182294, 23.125703, 23.141445 | 21.548 [21.537-21.569] | 23.134 [23.101-23.182] | 7.36% |
+| 512/1 | 14.508617, 14.515280, 14.527984, 14.511727 | 14.442014, 14.501070, 14.550862, 14.561888 | 14.514 [14.509-14.528] | 14.526 [14.442-14.562] | 0.09% |
+| donate/16 | 349.398706, 358.519311, 358.965090, 358.603246 | 347.857775, 358.817129, 358.547761, 358.406850 | 358.561 [349.399-358.965] | 358.477 [347.858-358.817] | -0.02% |
+| donate/32 | 416.819167, 419.629482, 418.450375, 419.688967 | 416.094638, 419.229533, 419.057903, 418.163619 | 419.040 [416.819-419.689] | 418.611 [416.095-419.230] | -0.10% |
+| privacy/16 | 357.794695, 358.686382, 358.980025, 358.996274 | 358.004257, 359.313439, 358.864516, 358.581695 | 358.833 [357.795-358.996] | 358.723 [358.004-359.313] | -0.03% |
+| privacy/32 | 415.606700, 418.996465, 418.095234, 419.286798 | 418.228192, 418.698335, 417.042366, 417.848194 | 418.546 [415.607-419.287] | 418.038 [417.042-418.698] | -0.12% |
+| rare/16 | 357.954260, 358.474666, 358.951076, 359.029543 | 357.496179, 359.285124, 358.914183, 358.254735 | 358.713 [357.954-359.030] | 358.584 [357.496-359.285] | -0.04% |
+| rare/32 | 416.953793, 419.604068, 417.296975, 419.331821 | 417.938330, 419.827666, 418.281373, 416.541484 | 418.314 [416.954-419.604] | 418.110 [416.541-419.828] | -0.05% |
+| three6/16 | 321.665649, 324.780306, 325.224510, 324.790820 | 350.328259, 351.028064, 350.564993, 348.967093 | 324.786 [321.666-325.225] | 350.447 [348.967-351.028] | 7.90% |
+| three6/32 | 377.959764, 378.281147, 377.396902, 379.383102 | 407.200494, 408.946958, 406.297434, 405.100444 | 378.120 [377.397-379.383] | 406.749 [405.100-408.947] | 7.57% |
+| three7/16 | 324.645398, 324.409692, 324.714434, 325.001320 | 349.981923, 351.249756, 350.235175, 348.387937 | 324.680 [324.410-325.001] | 350.109 [348.388-351.250] | 7.83% |
+| three7/32 | 378.155320, 379.904756, 378.312946, 379.358858 | 405.665411, 406.923246, 408.122849, 403.411759 | 378.836 [378.155-379.905] | 406.294 [403.412-408.123] | 7.25% |
+| 512/16 | 217.522763, 218.345691, 217.707033, 218.105707 | 218.109043, 218.337393, 218.742348, 217.107305 | 217.906 [217.523-218.346] | 218.223 [217.107-218.742] | 0.15% |
+| 512/32 | 268.572454, 269.989320, 268.552498, 268.685861 | 269.197087, 270.048263, 269.311237, 268.792108 | 268.629 [268.552-269.989] | 269.254 [268.792-270.048] | 0.23% |
+
+### Persisted CLI confirmation: original → scalar
+
+All eight runs exited successfully after graceful cancellation. Normal production storage wrote 55 baseline and 50 candidate match directories in total; each run's directory count equals its final Saved counter. Different saved counts reflect normal independent random entropy. Every run includes the complete search, synchronous match handling, reseeding, progress reporting and disk persistence.
+
+| Pair | Version | Exact checked | Saved | Reported elapsed | Reported keys/s |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 0 | original | 3726819328 | 18 | 10.020 s | 371920474 |
+| 0 | scalar | 4051836416 | 10 | 10.020 s | 404364637 |
+| 1 | original | 3744892416 | 15 | 10.008 s | 374195536 |
+| 1 | scalar | 4081601024 | 19 | 10.010 s | 407738981 |
+| 2 | original | 3736879616 | 10 | 10.022 s | 372852504 |
+| 2 | scalar | 4058835456 | 9 | 10.018 s | 405139082 |
+| 3 | original | 3748519424 | 12 | 10.011 s | 374442056 |
+| 3 | scalar | 4077923840 | 12 | 10.024 s | 406796002 |
+
+Median throughput is **373.524 → 405.968 Mkeys/s (+8.69%)**. Full ranges are 371.920-374.442 and 404.365-407.739 Mkeys/s respectively. This independent persisted confirmation supports retaining the scalar specialization; it is not substituted for the controlled deterministic benchmarks.

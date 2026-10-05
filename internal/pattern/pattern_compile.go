@@ -94,6 +94,17 @@ func (matcher *Matcher) finish() {
 	}
 
 	if probeCount != 1 {
+		for wordIndex := range matcher.tables {
+			table := &matcher.tables[wordIndex]
+			if len(table.probes) == probeCount && len(table.checks) == 0 {
+				matcher.kind = matcherSingleWordSet
+				matcher.offset = uint8(wordIndex * 8)
+				matcher.tables[0] = *table
+
+				return
+			}
+		}
+
 		return
 	}
 

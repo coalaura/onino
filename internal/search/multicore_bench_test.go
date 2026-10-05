@@ -164,7 +164,20 @@ func measureSearch(t *testing.T, config measureConfig) measurement {
 	case "all_hits", "persistence":
 		patterns = allSuffixPatterns(1)
 	default:
-		t.Fatalf("unknown workload %q", config.workload)
+		found := false
+
+		for _, test := range anchoredBenchmarkCases() {
+			if test.name == config.workload {
+				patterns = test.patterns
+				found = true
+
+				break
+			}
+		}
+
+		if !found {
+			t.Fatalf("unknown workload %q", config.workload)
+		}
 	}
 
 	matcher := parallelMatcher(t, patterns...)

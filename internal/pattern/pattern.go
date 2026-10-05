@@ -15,6 +15,7 @@ const (
 	matcherAnchors
 	matcherBoundary
 	matcherSuffix
+	matcherSingleWordSet
 )
 
 // Matcher is an immutable, concurrency-safe OR of compiled patterns. Its zero
@@ -106,6 +107,17 @@ func (matcher *Matcher) Match(data [32]byte) bool {
 		return matcher.boundary.match(&data)
 	case matcherSuffix:
 		return matcher.boundary.matchSuffix(&data)
+	case matcherSingleWordSet:
+		word := binary.LittleEndian.Uint64(data[matcher.offset:])
+
+		for index := range matcher.tables[0].probes {
+			probe := &matcher.tables[0].probes[index]
+			if word&probe.mask == probe.value {
+				return true
+			}
+		}
+
+		return false
 	}
 
 	return matcher.matchGeneral(&data)
