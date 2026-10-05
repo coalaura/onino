@@ -11,14 +11,13 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/coalaura/onino/internal/cpu"
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
 	"github.com/coalaura/onino/internal/search"
 )
 
 func main() {
-	runtime.GOMAXPROCS(1)
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -32,10 +31,15 @@ func main() {
 func newCommand() *cli.Command {
 	return &cli.Command{
 		Name:        "onino",
-		Usage:       "Continuously search for vanity v3 onion addresses with one CPU worker",
+		Usage:       "Continuously search for vanity v3 onion addresses",
 		ArgsUsage:   "pattern [pattern ...]",
 		Description: "Patterns match the 32-byte public key encoded as lowercase base32.\nForms: prefix.  .suffix  prefix.suffix  .interior.  anywhere",
 		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:  "cpu",
+				Value: "1",
+				Usage: "Search workers: a positive integer or all available logical CPUs",
+			},
 			&cli.StringFlag{
 				Name:    "output",
 				Aliases: []string{"o"},
@@ -57,6 +61,35 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
+	topology, err := cpu.Discover()
+	if err != nil {
+		return err
+	}
+
+	workers, err := cpu.Resolve(command.String("cpu"), len(topology.CPUs))
+	if err != nil {
+		return err
+	}
+
+	runtime.GOMAXPROCS(workers)
+
+	var processors []cpu.CPU
+
+	placement := "OS placement"
+
+	if workers > 1 {
+		if topology.Known {
+			processors, err = cpu.Select(topology, workers, true)
+			if err != nil {
+				return err
+			}
+
+			placement = "pinning physical cores first, spread across caches"
+		} else {
+			placement = "OS placement (topology/affinity unavailable)"
+		}
+	}
+
 	output := command.String("output")
 
 	store, err := onion.NewStore(output)
@@ -64,7 +97,7 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	fmt.Fprintf(command.ErrWriter, "Searching with one worker; saving matches to %s. Press Ctrl+C to stop.\n", output)
+	fmt.Fprintf(command.ErrWriter, "Searching with %d worker(s), %s; saving matches to %s. Press Ctrl+C to stop.\n", workers, placement, output)
 
 	started := time.Now()
 	lastReport := started
@@ -89,7 +122,9 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		command.ErrWriter.Write(line)
 	}
 
-	stats, err := search.RunWithProgress(ctx, matcher, func(key onion.Key) error {
+	options := search.Options{Workers: workers, CPUs: processors, Progress: progress}
+
+	stats, err := search.RunWithOptions(ctx, matcher, func(key onion.Key) error {
 		saveError := store.Save(key)
 		if saveError != nil {
 			return saveError
@@ -98,7 +133,7 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		fmt.Fprintln(command.Writer, key.Hostname())
 
 		return nil
-	}, progress)
+	}, options)
 
 	elapsed := time.Since(started)
 	rate := float64(stats.Checked) / elapsed.Seconds()

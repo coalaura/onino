@@ -1,6 +1,6 @@
 # Search design and optimization results
 
-onino optimizes complete, single-worker searches: a useful candidate must have canonical public-key bytes, an exact match decision and an independently valid expanded secret. Generating intermediate coordinates cheaply is insufficient if conversion, sign recovery or reseeding costs more afterward. PACE is the performance target; stock Go and portable paths remain compatibility requirements.
+onino optimizes complete searches around a single-worker engine: a useful candidate must have canonical public-key bytes, an exact match decision and an independently valid expanded secret. Generating intermediate coordinates cheaply is insufficient if conversion, sign recovery or reseeding costs more afterward. Multicore execution gives each worker an independent instance of that engine. PACE is the performance target; stock Go and portable paths remain compatibility requirements.
 
 ## Paired affine generation
 
@@ -47,6 +47,113 @@ The portable Go engine was validated and benchmarked before assembly was added. 
 The amd64 leaves reuse the four-limb BMI2/ADX multiply core. PACE's natural argument registers avoid adapters; the routines are zero-frame, NOSPLIT leaves without calls. X registers preserve pointers across the multiplication core; R14 and X15 are untouched. The emitted assembler listings were checked, including the absence of AVX instructions in these arithmetic leaves. Constant memory displacements and expired prefix-product scratch avoid unnecessary address updates and copies.
 
 BMI2/ADX arithmetic dispatch is independent of AVX2 matcher dispatch. AVX2 is the SIMD ceiling and requires CPU, OSXSAVE and XGETBV support. `purego` selects real portable arithmetic and matching, not an assembly-backed simulation.
+
+## Multicore search
+
+### Ownership and coordination
+
+This pass started from clean SHA `ccf7acd2ac359ee666b77ba997f4eb4e5ee93379`. The unchanged checkout was compiled and measured before edits; its test binary was retained for alternating comparisons. The arithmetic, matcher dispatch, AVX2 ceiling and existing `Run`/`RunWithProgress` implementations remain unchanged. `RunWithOptions` dispatches directly to the existing path for one unpinned worker. The CLI defaults to `--cpu 1`, resolves `all` against process availability, rejects excessive counts and sets `GOMAXPROCS` once. Libraries do not set it.
+
+Parallel workers persist for the search lifetime. Each initializes after pinning and owns its generator, independent OS-secure seeds, pending candidates, scratch and ordinary counters. There are no candidate queues or recurring barriers. Workers check cancellation between existing 512-checked-candidate batches and publish cumulative counters every 128 batches into separate 256-byte atomic slots. Padding isolates writers even if the allocation is not cache-line aligned. A coordinator samples about every four seconds; publication can lag by up to 65,536 checks per active worker. Final publication and joining every worker make returned totals exact, including partially completed failed batches.
+
+Only hits acquire the save mutex. Save callbacks and progress callbacks never overlap; a busy save makes the coordinator skip that reporting tick. Successful saves alone increment `Saved` and the existing value-snapshot, pending-sibling invalidation and independent-reseeding rules apply unchanged. Startup, worker, save and affinity-cleanup failures stop peers and retain substantive errors instead of replacing them with cancellation. Normal cancellation drains in-flight batches. Arbitrary synchronous callbacks cannot be interrupted: a callback must eventually return for shutdown to finish. The completion channel carries one notification per worker, never search work.
+
+Windows uses CPU-set topology, process CPU-set/hard-affinity restrictions and group-aware thread affinity. Linux uses `sched_getaffinity` plus sysfs physical-core/cache topology. Missing topology leaves OS placement with an explicit startup message; discovery or requested pinning failures are errors. Other systems use `runtime.NumCPU` and report unsupported topology/affinity. Each pinned worker locks its OS thread before applying affinity and creating state. Cleanup restores prior affinity before unlocking; failed restoration retires the locked thread. Windows machines with multiple processor groups conservatively retire restored worker threads too, because a single `GROUP_AFFINITY` cannot represent an originally unconstrained all-group thread.
+
+### Placement decision
+
+The Windows 11 Ryzen 9950X3D exposes 16 physical cores, 32 logical CPUs and two last-level-cache groups. The OS-reported groups on this host were logical 0-15 and 16-31, with adjacent SMT pairs. Selection uses the discovered core/cache identities, not those numbering patterns. `packed` visits a cache's physical cores together; `spread` alternates caches before taking any SMT sibling. The CLI keeps one worker unpinned on the direct path and uses spread placement for multiple workers. Experimental placement/publication controls are not CLI flags.
+
+Three alternating five-second production samples per placement, following a one-second screen, gave these median rare-prefix rates in million keys/s:
+
+| Workers | OS placement | Pinned, packed caches | Pinned, spread caches |
+| ---: | ---: | ---: | ---: |
+| 2 | 42.99 | 46.36 | 46.57 |
+| 8 | 117.64 | 189.99 | 193.01 |
+| 16 | 230.56 | 374.12 | 377.57 |
+| 32 | 418.34 | 417.47 | 417.54 |
+
+Spread avoids the large scheduler-dependent losses seen at partial occupancy and performed slightly better than packing on this machine. It is not a universal cache/NUMA optimization: the initial screen's OS placement was faster at four/eight workers and there is little difference when every logical CPU is occupied. No hybrid-core or multi-socket performance claim follows from this result.
+
+### Scaling and coordination results
+
+Measurements used PACE Go 1.27.1, Windows/amd64, `GOAMD64=v1`, no PGO and `GOMAXPROCS` equal to workers. Each worker initialized and warmed for 200 ms before a one-time start gate. Three five-second samples per configuration alternated production/reference order; placement comparisons reversed placement order too. Initialization and warm-up are excluded; batch draining, affinity restoration and joining are included. Search-only runs use independent reproducible SHAKE streams and a concurrency-safe no-op save callback. The reference uses the same engine, pinning and cancellation polling with local counters, but no periodic publication, save serialization or progress coordinator. Progress-enabled runs use the real four-second timer and a no-op reporter; CLI status formatting has separate allocation tests and terminal I/O is not timed.
+
+Rare-prefix results below are medians in million keys/s. "Per worker" is aggregate throughput divided by worker count, not a measurement of individual-worker skew. The one-worker row deliberately exercises the coordinated, pinned runner to compare like-for-like overhead; it is not the CLI's direct, unpinned one-worker default.
+
+| Workers | Independent reference | Production | Production + progress | Production per worker |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 19.55 | 20.24 | 19.51 | 20.24 |
+| 2 | 46.04 | 45.40 | 46.06 | 22.70 |
+| 4 | 93.84 | 95.29 | 95.61 | 23.82 |
+| 8 | 192.01 | 193.05 | 194.04 | 24.13 |
+| 16 | 375.40 | 375.20 | 377.32 | 23.45 |
+| 24 | 389.75 | 395.23 | 395.64 | 16.47 |
+| 32 | 420.43 | 419.54 | 413.97 | 13.11 |
+
+Overhead is `1 - production/reference`, using comparable medians. The largest positive rare-match overhead was 1.38% without progress and 1.54% with progress; negative values are run-to-run variation, not a claim that coordination accelerates the engine. The approximately 1-2% coordination goal was met in this matrix. Physical-core rates must not be extrapolated linearly across SMT siblings.
+
+The same seven counts, reference and progress modes were measured for the other workloads. Production medians without reporting are below, also in million keys/s; divide by workers for the corresponding average per-worker rate. The ordinary/shared dictionaries contain 512 anywhere literals. All-hit search matches `.a` and `.q`, includes every successful callback and reseed and excludes disk I/O.
+
+| Workers | Frequent `ab.` | Ordinary dictionary | Shared-triplet dictionary | Every candidate hits |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 18.179 | 14.104 | 14.992 | 0.119 |
+| 2 | 39.065 | 30.289 | 31.373 | 0.246 |
+| 4 | 79.966 | 62.135 | 63.364 | 0.498 |
+| 8 | 159.179 | 123.506 | 123.562 | 0.968 |
+| 16 | 304.626 | 235.914 | 237.038 | 1.853 |
+| 24 | 320.869 | 254.323 | 255.684 | 1.948 |
+| 32 | 337.065 | 273.999 | 275.065 | 2.015 |
+
+Across these workloads the largest positive median overhead was about 1.1% without progress and 1.2% with progress. Steady-state batch/save-wrapper/publication tests and all direct full-search benchmarks report zero allocations. Whole timed rare-search runs typically recorded `workers + 1` allocations, with occasional runtime noise; these cover one-time timer/worker-transition/shutdown work and are not per-candidate allocations. Real persistence allocates separately.
+
+Three alternating 30-second samples exposed sustained-run variation: at 16 workers the reference/production/progress medians were 373.16/374.36/376.98 million keys/s; at 32 they were 414.76/419.87/415.92. Samples varied by roughly 2% within a mode. Frequency and temperature counters were not collected, so timing variation cannot be attributed specifically to thermal behavior.
+
+Simultaneously running pinned single-worker processes, synchronized to a common start and given the same CPU list, provide a second reference. Three alternating five-second samples gave production/process medians of 47.14/47.18, 198.29/198.56, 380.76/382.02 and 411.04/422.65 million keys/s at 2, 8, 16 and 32 workers respectively. The first three differ by less than 0.4%; at 32 workers production is about 2.75% below the process reference. That gap remains a limitation; the independent-loop coordination result is not a guarantee against every process/scheduler configuration.
+
+### Persistence and single-worker acceptance
+
+Real-persistence runs used OS entropy and `onion.Store.Save`, including validation, file flushes and directory rename, in temporary directories. They used progress, spread placement, three five-second cancellation deadlines and no hostname printing. Median successful saves/s were 410, 379 and 354 at 1, 4 and 16 workers, respectively, with roughly 28 allocations and 3.6 KiB allocated per saved key. Synchronous storage dominated. Total elapsed times were 5.18-6.24, 5.38-5.69 and 21.64-23.88 seconds: at 16 workers an all-hit in-flight batch drain required 8,192 saves. These numbers must not be compared with cheap-callback search rates as if they measured the same work.
+
+The initial unchanged-engine screen used six one-second samples on logical CPU 2, including 39.57 ns/key for the rare-prefix median. Final single-worker comparisons used that preserved baseline binary, logical CPU 2 affinity, a warm-up of each binary, five alternating two-second samples and the ordinary test build without the opt-in multicore measurement harness. Medians below are ns/key, with lower values better:
+
+| Workload | Starting binary | Final binary | Change |
+| --- | ---: | ---: | ---: |
+| Rare prefix | 39.86 | 39.72 | -0.35% |
+| Frequent `ab.` | 48.39 | 48.43 | +0.08% |
+| Every candidate hits | 7675 | 7696 | +0.27% |
+| Ordinary 512 | 62.04 | 63.30 | +2.03% |
+| Shared-triplet 512 | 61.72 | 63.03 | +2.12% |
+| Mixed 512 | 65.03 | 66.07 | +1.60% |
+| Short 512 | 480.2 | 482.5 | +0.48% |
+
+The strict no-reproducible-single-worker-regression goal is **not fully met**: dictionary slowdowns repeated across comparisons. Hot engine source is unchanged and inspected worker/batch/reseed/base-multiply machine instructions were unchanged apart from relocation. Linking the larger experimental harness shifted which workloads were slower; keeping it behind `-tags measure` isolates it from ordinary tests, but does not eliminate the dictionary difference. Binary layout is a plausible contributor, not a proven cause. No arbitrary padding or arithmetic changes were introduced to tune a particular executable. All samples remained 0 B/op and 0 allocs/op.
+
+### Reproducing the multicore pass
+
+Create `measurements` if necessary. Before modifying a clean starting checkout, retain its ordinary test binary using `pace test -vet=off -c -pgo=off -o measurements/multicore-baseline.exe ./internal/search`. Build both versions with the same PACE toolchain and `GOAMD64=v1`; the starting SHA above identifies the baseline. Current-tree Windows commands are:
+
+```powershell
+$env:GOAMD64 = "v1"
+pace test -vet=off -c -pgo=off -o measurements/multicore-single-final.exe ./internal/search
+pace test -vet=off -c -pgo=off -tags measure -o measurements/multicore-candidate.exe ./internal/search
+./scripts/measure-single.ps1 -Baseline measurements/multicore-baseline.exe -Candidate measurements/multicore-single-final.exe -Name multicore-single-warm -Time 2s -Count 5 -Affinity 4
+./scripts/measure-multicore.ps1 -Name placement -Workloads rare -Workers 2,8,16,32 -Modes parallel -Seconds 5 -Repeats 3
+./scripts/measure-multicore.ps1 -Name scaling -Placements spread -Seconds 5 -Repeats 3
+./scripts/measure-multicore.ps1 -Name sustained -Workloads rare -Workers 16,32 -Placements spread -Seconds 30 -Repeats 3
+./scripts/measure-multicore.ps1 -Name processes -Workers 2,8,16,32 -Seconds 5 -Repeats 3 -Processes
+./scripts/measure-multicore.ps1 -Name persistence -Workloads persistence -Workers 1,4,16 -Placements spread -Modes progress -Seconds 5 -Repeats 3
+```
+
+`-Affinity 4` means logical CPU 2 on this one-group measurement host; choose an allowed CPU on other machines. Run benchmarks serially. `measure-multicore.ps1` defaults to workers 1,2,4,8,16,24,32 and reference/parallel/progress modes, skips unavailable counts and imposes a three-hour test timeout. The default search-only matrix is bounded but lengthy. Portable invocation uses `ONINO_MEASURE=rare ONINO_WORKERS=1,2,4,8,16,24,32 ONINO_PLACEMENTS=spread ONINO_SECONDS=5 ONINO_REPEATS=3 pace test -vet=off -tags measure ./internal/search -run '^TestMeasureMulticore$' -v -timeout 3h`. Process comparisons use `ONINO_PROCESSES=2,8,16,32` and `TestMeasureProcesses` instead.
+
+The harness emits `MEASURE` JSON with exact checked/saved totals, elapsed duration, aggregate/average per-worker rates, allocation deltas and actual group/CPU/core/cache selections. The recorded local artifacts are `measurements/multicore-{rare,frequent,512,shared512,all_hits}.txt`, `multicore-placement-{screen,sustained}.txt`, `multicore-sustained.txt`, `multicore-processes.txt`, `multicore-persistence.txt` and `multicore-single-warm-{before,after}.txt`. Raw measurements and test binaries are ignored; the tables above retain the conclusions. Measurement controls live only in test builds/scripts and ordinary tests never launch a search experiment.
+
+### Multicore validation and limits
+
+Native and `purego` suites passed with PACE and stock Go on Windows; stock-Go native/purego suites and both race variants passed on Linux under WSL. Custom `vet --tests` passed for native, purego and measure builds, plus Linux amd64/arm64, Windows arm64 and Darwin targets. New focused tests cover strict CPU parsing and excessive counts, irregular core/cache/group identities, process-mask restrictions, physical-core-before-SMT selection, real pinned execution, affinity restoration/retirement, independent secure worker state, concurrent signed-key snapshots, callback serialization, blocked saves/reports, exact final counters, cancellation, initialization/reseed/save failures and zero-allocation coordination. The existing sibling-invalidation tests remain in place.
+
+Windows race binaries built with `builder test go --no-pace --cgo --dyn --compat --no-min --no-gen -vet=off -race`, but ThreadSanitizer failed before tests with a memory-allocation error (Windows error 87); they did not pass. WSL race commands were `go test -vet=off -race ./...` and `go test -vet=off -race -tags purego ./...`. Actual multi-group Windows hardware, hybrid cores and NUMA systems were unavailable; group-aware structures and selection are covered, but multi-group OS behavior is not hardware-validated. The portable fallback cannot discover restrictions beyond those reported by `runtime.NumCPU`. The single-worker dictionary and 32-process comparison gaps above remain open performance limits.
 
 ## Sequential arithmetic experiments
 

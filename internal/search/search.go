@@ -1,4 +1,4 @@
-// Package search implements a single-worker, continuous vanity-key search.
+// Package search implements continuous vanity-key search with private workers.
 package search
 
 import (
