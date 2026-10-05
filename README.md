@@ -73,25 +73,25 @@ CPU-only prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 wo
 | `privacy` | **421.5** | 342.8 | 128.7 |
 | `donate`, `mirror`, `secure` | **379.5** | 324.6 | 110.4 |
 
-**Min–max throughput**
+**Min-max throughput**
 
 | Prefixes | onino | onionloom | mkp224o |
 | --- | ---: | ---: | ---: |
-| `hello` | 410.7–416.5 | 334.9–340.7 | 129.5–129.8 |
-| `privacy` | 417.2–422.8 | 342.0–342.9 | 128.3–130.1 |
-| `donate`, `mirror`, `secure` | 377.8–379.8 | 323.6–327.4 | 108.9–111.0 |
+| `hello` | 410.7-416.5 | 334.9-340.7 | 129.5-129.8 |
+| `privacy` | 417.2-422.8 | 342.0-342.9 | 128.3-130.1 |
+| `donate`, `mirror`, `secure` | 377.8-379.8 | 323.6-327.4 | 108.9-111.0 |
 
 Each tool ran three ~20-second samples per workload after warm-up. Multiple prefixes match any listed prefix. [Raw samples](.github/prefix-comparison.csv) are available.
 
 Tested versions (2026-10-05):
 
-- [onino v0.1.0](https://github.com/coalaura/onino/releases/tag/v0.1.0) — built with PACE Go 1.27.1.
-- [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom) — official Windows release.
-- [mkp224o v1.7.0](https://github.com/cathugger/mkp224o) — official Windows release.
+- [onino v0.1.0](https://github.com/coalaura/onino/releases/tag/v0.1.0) - built with PACE Go 1.27.1.
+- [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom) - official Windows release.
+- [mkp224o v1.7.0](https://github.com/cathugger/mkp224o) - official Windows release.
 
 ## Optimization history
 
-Across eighteen optimization milestones, rare-prefix search improved from **125.5 to 39.21 ns/key (3.20× throughput)**, while matching against 512 anywhere patterns improved from **348.3 to 62.25 ns/key (5.60×)**.
+Across eighteen optimization milestones, rare-prefix search improved from **125.5 to 39.21 ns/key (3.20x throughput)**, while matching against 512 anywhere patterns improved from **348.3 to 62.25 ns/key (5.60x)**.
 
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/performance-history.svg">
