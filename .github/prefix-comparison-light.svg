@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="912" height="412" viewBox="36 10 912 412" role="img" aria-labelledby="title description">
+	<title id="title">CPU-only prefix search: onino, onionloom and mkp224o</title>
+	<desc id="description">Median throughput in million candidates per second; higher is better. For hello: onino 412.8, onionloom 338.5, mkp224o 129.8. For privacy: onino 421.5, onionloom 342.8, mkp224o 128.7. For donate, mirror or secure: onino 379.5, onionloom 324.6, mkp224o 110.4. All bars share a zero baseline. Measured on a Ryzen 9 9950X3D with 32 CPU workers, three runs per workload and GPU support disabled.</desc>
+	<style>
+		:root { color-scheme: light; }
+		text { fill: #64748b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 16px; }
+		.title { fill: #475569; font-size: 28px; font-weight: 650; }
+		.onino { fill: #7d4698; }
+		.onionloom { fill: #719a35; }
+		.mkp224o { fill: #a187b6; }
+		.grid { fill: none; stroke: #8592a3; stroke-opacity: 0.25; stroke-width: 1; }
+		.axis { fill: none; stroke: #8592a3; stroke-opacity: 0.6; stroke-width: 1; }
+		.ticks text { font-size: 14px; font-variant-numeric: tabular-nums; }
+		.value { fill: #475569; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+		.prefix { fill: #475569; font-family: ui-monospace, "Cascadia Code", "Segoe UI Mono", monospace; font-size: 17px; }
+		.footer { font-size: 14px; }
+	</style>
+	<text class="title" x="44" y="38">CPU prefix search comparison</text>
+	<text x="44" y="65">Median million candidates/second · higher is better</text>
+
+	<g aria-hidden="true">
+		<rect class="onino" x="44" y="88" width="14" height="14" rx="2"/>
+		<text x="68" y="101">onino</text>
+		<rect class="onionloom" x="166" y="88" width="14" height="14" rx="2"/>
+		<text x="190" y="101">onionloom</text>
+		<rect class="mkp224o" x="330" y="88" width="14" height="14" rx="2"/>
+		<text x="354" y="101">mkp224o</text>
+	</g>
+
+	<path class="grid" d="M92,150H936 M92,200H936 M92,250H936 M92,300H936"/>
+	<path class="axis" d="M92,350H936"/>
+	<g class="ticks" text-anchor="end">
+		<text x="76" y="155">400</text>
+		<text x="76" y="205">300</text>
+		<text x="76" y="255">200</text>
+		<text x="76" y="305">100</text>
+		<text x="76" y="355">0</text>
+	</g>
+
+	<g text-anchor="middle">
+		<g id="hello-onino" class="onino">
+			<rect x="144" y="143.6" width="56" height="206.4" rx="2"/>
+			<text class="value" x="172" y="133.6">412.8</text>
+		</g>
+		<g id="hello-onionloom" class="onionloom">
+			<rect x="212" y="180.75" width="56" height="169.25" rx="2"/>
+			<text class="value" x="240" y="170.75">338.5</text>
+		</g>
+		<g id="hello-mkp224o" class="mkp224o">
+			<rect x="280" y="285.1" width="56" height="64.9" rx="2"/>
+			<text class="value" x="308" y="275.1">129.8</text>
+		</g>
+		<text class="prefix" x="240" y="382">hello</text>
+
+		<g id="privacy-onino" class="onino">
+			<rect x="424" y="139.25" width="56" height="210.75" rx="2"/>
+			<text class="value" x="452" y="129.25">421.5</text>
+		</g>
+		<g id="privacy-onionloom" class="onionloom">
+			<rect x="492" y="178.6" width="56" height="171.4" rx="2"/>
+			<text class="value" x="520" y="168.6">342.8</text>
+		</g>
+		<g id="privacy-mkp224o" class="mkp224o">
+			<rect x="560" y="285.65" width="56" height="64.35" rx="2"/>
+			<text class="value" x="588" y="275.65">128.7</text>
+		</g>
+		<text class="prefix" x="520" y="382">privacy</text>
+
+		<g id="multi-onino" class="onino">
+			<rect x="704" y="160.25" width="56" height="189.75" rx="2"/>
+			<text class="value" x="732" y="150.25">379.5</text>
+		</g>
+		<g id="multi-onionloom" class="onionloom">
+			<rect x="772" y="187.7" width="56" height="162.3" rx="2"/>
+			<text class="value" x="800" y="177.7">324.6</text>
+		</g>
+		<g id="multi-mkp224o" class="mkp224o">
+			<rect x="840" y="294.8" width="56" height="55.2" rx="2"/>
+			<text class="value" x="868" y="284.8">110.4</text>
+		</g>
+		<text class="prefix" x="800" y="382">donate / mirror / secure</text>
+	</g>
+
+	<text class="footer" x="44" y="410">Ryzen 9 9950X3D · 32 CPU workers · 3 runs per workload</text>
+</svg>

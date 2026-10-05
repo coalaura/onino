@@ -2,22 +2,22 @@
 	<title id="title">Onino search performance over eighteen cumulative milestones</title>
 	<desc id="description">Total nanoseconds per checked key, lower is better. Rare-prefix search falls from 125.5 to 39.21 ns/key, a 3.20-fold throughput increase. Searching 512 anywhere patterns falls from 348.3 to 62.25 ns/key, a 5.60-fold throughput increase. Dots are medians of five one-second samples for steps 00–15 and ten for steps 16–17; vertical whiskers show the full range. Both panels start at zero. Stage numbers follow implementation order, not elapsed time. Numerical results and measurement details accompany this image.</desc>
 	<style>
-		:root { color-scheme: dark; }
-		text { fill: #b6c2d2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 18px; }
+		:root { color-scheme: light; }
+		text { fill: #64748b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 18px; }
 		polyline { fill: none; stroke-width: 3; stroke-linejoin: round; }
 		circle { stroke: none; }
-		.title { fill: #e2e8f0; font-size: 34px; font-weight: 650; }
-		.section { fill: #e2e8f0; font-size: 18px; font-weight: 600; }
+		.title { fill: #475569; font-size: 34px; font-weight: 650; }
+		.section { fill: #475569; font-size: 18px; font-weight: 600; }
 		.summary { font-size: 18px; }
 		.grid { fill: none; stroke: #8592a3; stroke-opacity: 0.25; stroke-width: 1; }
 		.axis { fill: none; stroke: #8592a3; stroke-opacity: 0.6; stroke-width: 1; }
 		.ticks text { font-size: 17px; font-variant-numeric: tabular-nums; }
 		.series { fill: currentColor; stroke: currentColor; }
 		.range { fill: none; stroke-width: 1.5; stroke-opacity: 0.5; }
-		.rare, .dictionary512 { color: #b178d3; }
-		.frequent, .prefix512 { color: #98bf60; }
+		.rare, .dictionary512 { color: #7d4698; }
+		.frequent, .prefix512 { color: #719a35; }
 		.frequent polyline { stroke-dasharray: 7 5; }
-		.dictionary64 { color: #c6b5d6; }
+		.dictionary64 { color: #a187b6; }
 		.dictionary64 polyline { stroke-dasharray: 9 4; }
 		.prefix512 polyline { stroke-dasharray: 3 5; }
 		.step { font-weight: 650; font-variant-numeric: tabular-nums; }

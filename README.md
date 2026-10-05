@@ -57,57 +57,49 @@ Steady-state search performs no heap allocations. Each worker owns its generator
 
 ## Benchmarks
 
-### Single-worker baseline
+CPU-only prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 workers** and normal key-file output. Onionloom used `--gpu off`. Rates are **million candidates/second**; higher is better.
 
-PACE Go 1.27.1 on Windows 11/amd64 and an AMD Ryzen 9 9950X3D, with `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Values are medians from ten alternating one-second runs against baseline `d01aa81`; lower ns/key is better. These historical measurements predate visible character-52 matching; [visible-suffix measurements](RESEARCH.md#visible-character-52-matching) cover the updated boundary. Stock Go and `purego` remain tested compatibility targets.
+<picture>
+	<source media="(prefers-color-scheme: dark)" srcset=".github/prefix-comparison.svg">
+	<source media="(prefers-color-scheme: light)" srcset=".github/prefix-comparison-light.svg">
+	<img alt="Median CPU-only throughput for onino, onionloom and mkp224o across the same three prefix workloads, shown as grouped bars on a shared zero-based scale." src=".github/prefix-comparison-light.svg">
+</picture>
 
-| Workload | PACE, ns/key | PACE keys/second |
-| --- | ---: | ---: |
-| Full search, rare prefix | 39.27 | 25.47 million |
-| Full search, frequent `ab.` | 48.55 | 20.60 million |
-| Full search, every candidate hits | 7652 | 130,700 |
-| Full search, 512 anywhere patterns | 62.10 | 16.10 million |
-| Full search, 512 shared-triplet patterns | 61.69 | 16.21 million |
-| Full search, 512 prefixes | 41.59 | 24.05 million |
-| Full search, 512 suffixes | 41.56 | 24.06 million |
+**Median throughput**
 
-All search samples report **0 B/op and 0 allocs/op**. Rare-prefix samples ranged from 39.26-39.74 ns/key; ordinary 512-pattern searches ranged from 62.03-62.89. Fingerprints and constant-time divsteps improve their throughput by 2.5% and 12.1% over the baseline. These are elapsed timings on one pinned worker; [research notes](RESEARCH.md#final-bounded-pass-fingerprints-and-divsteps) give full ranges, mixed workloads, memory costs and the historical compiler comparison.
+| Prefixes | onino | onionloom | mkp224o |
+| --- | ---: | ---: | ---: |
+| `hello` | **412.8** | 338.5 | 129.8 |
+| `privacy` | **421.5** | 342.8 | 128.7 |
+| `donate`, `mirror`, `secure` | **379.5** | 324.6 | 110.4 |
 
-Full-search benchmarks include center transitions, matching, sign completion, statistics, discarded-candidate replenishment, immutable key snapshots and per-hit reseeding. They use reproducible SHAKE entropy and a cheap synchronous callback; startup, OS random acquisition, cancellation polling and disk persistence are outside the timed loop. Actual CLI throughput depends on hit rate and storage.
+**Min–max throughput**
 
-To benchmark the production search loop:
+| Prefixes | onino | onionloom | mkp224o |
+| --- | ---: | ---: | ---: |
+| `hello` | 410.7–416.5 | 334.9–340.7 | 129.5–129.8 |
+| `privacy` | 417.2–422.8 | 342.0–342.9 | 128.3–130.1 |
+| `donate`, `mirror`, `secure` | 377.8–379.8 | 323.6–327.4 | 108.9–111.0 |
 
-```sh
-go test -vet=off -pgo=off ./internal/search -run '^$' -bench '^Benchmark(FullSearch|DictionarySearch)$' -benchmem -benchtime=1s -count=5 -cpu=1
-pace test -vet=off -pgo=off ./internal/search -run '^$' -bench '^Benchmark(FullSearch|DictionarySearch)$' -benchmem -benchtime=1s -count=5 -cpu=1
-```
+Each tool ran three ~20-second samples per workload after warm-up. Multiple prefixes match any listed prefix. [Raw samples](.github/prefix-comparison.csv) are available.
 
-Run benchmarks serially with `GOMAXPROCS=1`, `GOAMD64=v1` and consistent CPU affinity. For compiler comparisons, build the same source with both toolchains and alternate their test binaries to reduce run-order bias.
+Tested versions (2026-10-05):
 
-### Multicore performance
+- [onino v0.1.0](https://github.com/coalaura/onino/releases/tag/v0.1.0) — built with PACE Go 1.27.1.
+- [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom) — official Windows release.
+- [mkp224o v1.7.0](https://github.com/cathugger/mkp224o) — official Windows release.
 
-On the same Ryzen 9950X3D, pinned physical-cores-first placement gave the following median rare-prefix throughput with cheap callbacks, three alternating five-second samples per configuration and a warm-up before each sample:
+## Optimization history
 
-| Workers | Million keys/s | Million keys/s per worker |
-| ---: | ---: | ---: |
-| 2 | 45.40 | 22.70 |
-| 4 | 95.29 | 23.82 |
-| 8 | 193.05 | 24.13 |
-| 16 | 375.20 | 23.45 |
-| 24 | 395.23 | 16.47 |
-| 32 | 419.54 | 13.11 |
+Across eighteen optimization milestones, rare-prefix search improved from **125.5 to 39.21 ns/key (3.20× throughput)**, while matching against 512 anywhere patterns improved from **348.3 to 62.25 ns/key (5.60×)**.
 
-Rare-match coordination overhead was within 1.6% of equivalent independent worker loops, including progress-enabled comparisons. SMT adds throughput without preserving physical-core per-worker speed. Real synchronous persistence was storage-bound. Single-worker hot-loop code is unchanged, but repeated final-binary dictionary measurements were about 2% slower than the starting binary; the strict no-regression goal remains unresolved. [Multicore research notes](RESEARCH.md#multicore-search) contain the full workload matrix, placement/process comparisons, limitations and bounded reproduction commands.
+<picture>
+	<source media="(prefers-color-scheme: dark)" srcset=".github/performance-history.svg">
+	<source media="(prefers-color-scheme: light)" srcset=".github/performance-history-light.svg">
+	<img alt="Full-search performance across eighteen milestones, from the first batched projective engine through dictionary fingerprints and constant-time divsteps inversion." src=".github/performance-history-light.svg">
+</picture>
 
-### Optimization history
-
-Eighteen cumulative milestones were built with the same PACE toolchain and measured with one full-search harness, from the first batched engine through adjacent-symbol fingerprints and constant-time divsteps inversion. Rare-prefix search went from **125.5 to 39.21 ns/key (3.20x throughput)**; a 512-pattern anywhere dictionary went from **348.3 to 62.25 ns/key (5.60x)**.
-
-![Full-search performance across eighteen milestones, from the first batched projective engine through dictionary fingerprints and constant-time divsteps inversion.](.github/performance-history.svg)
-
-Each point is the median of five one-second samples for steps 00-15 and ten for steps 16-17 on the same pinned worker; whiskers show the full range. The graph preserves every earlier measurement, including plateaus and regressions and extends all five series with the two retained improvements.
-
-The [performance history CSV](.github/performance-history.csv) contains every milestone's samples and the final-pass baseline comparison. The [measurement notes](RESEARCH.md#cumulative-performance-history) describe the later history run, including its progress-reporting check; the performance table above uses the separate final-pass comparison.
+Each point shows median single-worker performance; whiskers show the full measured range, including plateaus and regressions. The [research notes](RESEARCH.md#cumulative-performance-history) cover the experiments and methodology, with [raw measurements](.github/performance-history.csv) available separately.
 
 ## Verification
 
