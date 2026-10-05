@@ -50,7 +50,7 @@ BMI2/ADX arithmetic dispatch is independent of AVX2 matcher dispatch. AVX2 is th
 
 ## Sequential arithmetic experiments
 
-These four experiments started from clean commit `d4def3e` and used PACE Go 1.27.1 on Windows 11, Ryzen 9 9950X3D, `GOAMD64=v1`, `GOMAXPROCS=1`, `-pgo=off` and logical CPU 2 affinity (mask 4). Each candidate was compared with the last accepted implementation, serially, with five alternating one-second samples per variant and reversed order on alternating pairs. Tables give median [minimum, maximum] ns/key and median throughput change, calculated as `baseline/candidate-1`. All timed search and arithmetic samples reported **0 B/op and 0 allocs/op**. The workload and timing exclusions are described under the current compiler comparison below.
+These four experiments started from clean commit `d4def3e` and used PACE Go 1.27.1 on Windows 11, Ryzen 9 9950X3D, `GOAMD64=v1`, `GOMAXPROCS=1`, `-pgo=off` and logical CPU 2 affinity (mask 4). Each candidate was compared with the last accepted implementation, serially, with five alternating one-second samples per variant and reversed order on alternating pairs. Tables give median [minimum, maximum] ns/key and median throughput change, calculated as `baseline/candidate-1`. All timed search and arithmetic samples reported **0 B/op and 0 allocs/op**. The workload and timing exclusions are described under the historical compiler comparison below.
 
 ### 1. Shared reciprocal product: retained
 
@@ -76,7 +76,7 @@ The four-limb square accumulates six off-diagonal products once, doubles the ent
 | 512 anywhere patterns | 69.85 [69.82, 69.95] | 69.47 [69.38, 69.58] | +0.55% |
 | 512 shared-triplet patterns | 64.83 [64.80, 64.95] | 64.38 [64.34, 64.53] | +0.70% |
 
-The square was also evaluated in a four-limb implementation of the established inversion chain, using 254 squares and 11 multiplies. Inversion measured 1708 [1686, 1708] versus 1703 [1693, 1716] ns/op, an inconclusive difference. Complete searches also failed to improve reproducibly, so that prototype was removed and inversion retains the dependency's existing implementation. Timing variation was wider in this screen:
+The square was also evaluated in a four-limb implementation of the established inversion chain, using 254 squares and 11 multiplies. Inversion measured 1708 [1686, 1708] versus 1703 [1693, 1716] ns/op, an inconclusive difference. Complete searches also failed to improve reproducibly, so that prototype was removed and this pass left the dependency's inversion unchanged. The later divsteps experiment below uses a different algorithm. Timing variation was wider in this screen:
 
 | Full search | Accepted preparation square | Four-limb inversion | Throughput |
 | --- | ---: | ---: | ---: |
@@ -130,7 +130,7 @@ These five alternating one-second samples compare four independent integer chain
 
 ### Retained result against the original baseline
 
-The final comparison used ten alternating one-second samples per variant, combining two five-pair runs, with all samples retained. Dictionary timings varied more than in the individual acceptance screens and their ranges overlap. Reciprocal simplification and preparation squaring are the only retained arithmetic changes; the all-hit projective fallback is unaffected.
+The final comparison used ten alternating one-second samples per variant, combining two five-pair runs, with all samples retained. Dictionary timings varied more than in the individual acceptance screens and their ranges overlap. Reciprocal simplification and preparation squaring are the only retained arithmetic changes from this pass; the all-hit projective fallback is unaffected.
 
 | Full search | Original median [range], ns/key | Final median [range], ns/key | Throughput |
 | --- | ---: | ---: | ---: |
@@ -141,6 +141,72 @@ The final comparison used ten alternating one-second samples per variant, combin
 | 512 shared-triplet patterns | 69.14 [67.94, 69.33] | 65.385 [64.43, 69.38] | +5.74% |
 
 All 100 samples were allocation-free. This original-to-final experiment is separate from the same-source compiler comparison below; their timings should not be mixed to calculate gains.
+
+## Final bounded pass: fingerprints and divsteps
+
+This pass started from clean **`d01aa812524e6fe3b4d4a36246524075e047025e`**, including the shared reciprocal and dedicated square retained in `336671a`. It used PACE Go 1.27.1, Windows 11, Ryzen 9 9950X3D, `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity (mask 4). Baseline and candidate binaries included the same added mixed/short benchmark fixtures. Experiments ran sequentially against the last accepted version, with at least five alternating one-second samples per variant and order reversed on alternating pairs. Ten samples confirmed divsteps, the scratch decision and the final baseline comparison. A batch-filter run affected by an unrelated heavy tool was discarded and repeated after the tool stopped; all samples from the replacement and final runs were retained.
+
+### 1. Dictionary filtering
+
+Separate five-second CPU profiles distinguished rare generation from ordinary/shared 512-pattern dictionaries. Before changes, preparation/reverse arithmetic/standalone multiplication occupied 36.7%/26.2%/15.4% of rare-search samples; matching was about 2%. Ordinary/shared dictionary matching occupied 40.9%/38.4% of complete searches. Window scanning plus triplet probing accounted for 29.8%/32.8%, versus 7.3%/2.2% for exact verification and symbol decoding. Membership tests, rank/bucket lookup and verifier-routing control collectively dominated, especially with shared triplets. Profiles and emitted assembly identify these paths, not branch-miss or cache-miss rates: Windows listed hardware-counter sources, but capture failed with profiling-policy error `0xc5585011`.
+
+Two independent screens followed [Wang et al., *Hyperscan*, NSDI 2019](https://www.usenix.org/conference/nsdi19/presentation/wang-xiang): use cheap literal filters before exact verification and expose independent work where worthwhile. The paper is an architectural reference, not a speedup prediction or an integration proposal.
+
+- **Four-candidate scalar membership batching: removed.** Thirteen stride-four probes per key produced survivor masks before bucket traversal, preserving candidate order, sign alternatives, pending-sibling invalidation and checked accounting. Ordinary/shared medians improved only 69.55→69.36 and 64.55→64.14 ns/key; frequent prefixes regressed 49.47→49.86. Mixed/short/anchored results did not justify the extra filtering pass and 512-byte decision array. This bounded screen stopped at scalar instruction parallelism; no new AVX2 backend was warranted.
+- **Adjacent-symbol fingerprints: retained.** Each triplet bucket stores two 32-bit membership masks, with one five-bit neighbor contributed per verifier. A candidate is rejected only when neither side's union admits it; every survivor still undergoes exact packed-key verification. Following symbols are preferred, with the preceding symbol used at literal ends. Stride-four neighbors are always at position 3 modulo 4, never deferred sign position 49; final-position padding and suffix offsets remain exact. Against the original implementation, the five-sample screen improved ordinary/shared dictionaries 69.52→63.02 and 64.46→62.66 ns/key, mixed anchors 72.44→66.19 and short fallbacks 488.0→478.8, without a reproducible rare/frequent/all-hit regression.
+
+Buckets grow from 16 to 24 bytes, adding exactly 8 bytes per occupied triplet: 16,368 bytes for the ordinary fixture and 16,208 for the shared fixture. Exact/signless matchers share these immutable tables; worker scratch does not grow. Final ordinary/shared profiles put total dictionary matching at 34.8%/34.6%, with exact verification below 0.4% of samples. Emitted code uses packed-byte extraction and scalar mask tests before verifier traversal; existing independent BMI2/ADX and AVX2 detection is preserved.
+
+### 2. Five-field paired scratch: removed
+
+The portable and assembly prototype reduced seven fields to five, **224→160 bytes per center and 56→40 KiB across 256 centers**. During preparation, the eventual plus-reciprocal slot held `1-c²` and the minus slot held its prefix product. Walking backward consumed the previous prefix and current denominator before replacing either, then reused expired `c` for `c*r`. Final `r+t` and `r-t` survived Y encoding, deferred X/sign recovery and transitions. This preserved the 9M+1S count and 512-candidate public batch and passed independent native/portable arithmetic and complete-key checks.
+
+Five-sample screening and ten-sample confirmation against fingerprints showed only about 0.2% faster paired searches. Confirmation medians were 40.17→40.09 ns/key for rare prefixes, 63.03→62.94 for ordinary dictionaries and 62.63→62.54 for shared dictionaries. All-hit and short fallbacks regressed 7663→7696 and 478.5→480.9, despite not using the modified scratch path. Binary layout is a possible explanation, not a measured cause. The complete-search acceptance rule rejected the prototype; the final state retains seven fields and about 114 KiB per worker. Improved cache behavior was not established.
+
+### 3. Constant-time divsteps: retained
+
+The inversion in `divsteps.go` follows [Bernstein-Yang, *Fast constant-time gcd computation and modular inversion*](https://gcd.cr.yp.to/safegcd-20190413.pdf) and the established [libsecp256k1 constant-time implementation](https://github.com/bitcoin-core/secp256k1/blob/master/src/modinv64_impl.h), with its [half-delta bound and implementation notes](https://github.com/bitcoin-core/secp256k1/blob/master/doc/safegcd_implementation.md). Both requested peer-reviewed papers were treated as high-credibility references (9/10), not evidence of workload speedups. The port preserves the upstream MIT notice and adds no dependency.
+
+Canonical four-limb inputs convert to five signed radix-62 limbs. Ten groups of 59 half-delta divsteps use matrices scaled for exact division by `2^62`; the established 590-step bound covers 256-bit inputs. Coefficients stay in `(-2p,p)` and two masked corrections normalize the output. Zero maps to zero, arbitrary 256-bit representatives reduce modulo `p`, output is canonical and in-place inversion is supported. Fixed loop counts, sign masks and fixed-index accesses replace input-dependent GCD control flow. PACE hot-loop assembly was inspected for secret-dependent branches/addresses and division instructions; only fixed-loop and runtime stack checks remained. This is algorithmically different from the rejected exponentiation-chain rewrite.
+
+Including both representation conversions, the initial five-sample screen reduced inversion from 1705 to 1215 ns/op. Ten-sample confirmation against the retained fingerprint version measured **1704 [1702,1711]→1215 [1214,1219] ns/op**, with rare/frequent/ordinary/shared searches improving 40.25→39.28, 49.41→48.55, 63.06→62.10 and 62.66→61.70 ns/key. Anchored and long-literal searches also improved. Small fallback regressions in the initial binary disappeared in confirmation; allocation counts stayed zero. These complete-search gains justified retaining the bounded implementation. Inversion adds stack-local working state and a 40-byte modulus constant, with no per-worker persistent storage.
+
+### Final comparison with the original checkout
+
+The following ten-sample medians and full ranges include all retained changes. Throughput is calculated from unrounded medians; displayed times are rounded. The [performance history CSV](.github/performance-history.csv) preserves all 360 search/arithmetic measurements under `run=final_comparison`, each reporting **0 B/op and 0 allocs/op**. Mixed workloads combine the ordinary 512-pattern set with prefix, suffix and combined anchors; short workloads add short anywhere/interior/prefix alternatives and exercise the projective fallback. All-hit ranges overlap and its small median difference is not an optimization claim.
+
+| Complete search | Baseline median [range], ns/key | Final median [range], ns/key | Final Mkeys/s | Throughput |
+| --- | ---: | ---: | ---: | ---: |
+| Rare prefix | 40.245 [40.15,40.80] | 39.270 [39.26,39.74] | 25.465 | +2.48% |
+| Frequent `ab.` | 49.480 [49.31,50.09] | 48.550 [48.39,49.01] | 20.597 | +1.92% |
+| Every candidate hits | 7672 [7667,7773] | 7652 [7646,7735] | 0.131 | +0.26% |
+| 512 anywhere patterns | 69.605 [69.45,70.22] | 62.095 [62.03,62.89] | 16.104 | +12.09% |
+| 512 shared-triplet patterns | 64.515 [64.38,65.25] | 61.690 [61.65,62.45] | 16.210 | +4.58% |
+| 512 patterns plus mixed anchors | 72.455 [72.27,73.50] | 65.060 [64.98,65.67] | 15.370 | +11.37% |
+| 512 patterns plus short fallbacks | 487.900 [487.70,495.50] | 478.100 [478.00,484.80] | 2.092 | +2.05% |
+| 64 prefixes | 42.390 [42.36,42.93] | 41.405 [41.32,41.47] | 24.152 | +2.38% |
+| 512 prefixes | 42.550 [42.52,43.24] | 41.585 [41.49,41.63] | 24.047 | +2.32% |
+| 64 suffixes | 42.400 [42.39,42.91] | 41.410 [41.33,41.69] | 24.149 | +2.39% |
+| 512 suffixes | 42.565 [42.52,43.15] | 41.560 [41.48,42.53] | 24.062 | +2.42% |
+| 64 combined anchors | 42.405 [42.39,43.06] | 41.365 [41.33,41.84] | 24.175 | +2.51% |
+| 512 combined anchors | 42.560 [42.53,43.16] | 41.510 [41.49,42.35] | 24.091 | +2.53% |
+| 64 long literals | 55.260 [55.23,56.16] | 54.110 [54.08,55.11] | 18.481 | +2.13% |
+| 512 long literals | 63.705 [63.61,64.33] | 61.280 [61.19,62.29] | 16.319 | +3.96% |
+
+In the same final comparison, inversion measured 1685 [1685,1693]→1215.5 [1214,1217] ns/op, including conversion. Its amortized reduction is about 0.92 ns per candidate in a 512-key batch, consistent with complete-search improvements. Multiply/square remained about 7.00/6.18 ns/op. Timing and profile shares do not establish hardware-counter causes. Neither rejected prototype remains in production source.
+
+### Cumulative performance history
+
+The [history graph](.github/performance-history.svg) retains steps 00-15 and their original 480 samples, then adds **16: adjacent-symbol fingerprints** and **17: constant-time divsteps inversion**. The new steps reuse the original six-workload history harness, including 64 anywhere patterns and the periodic `progressReporter.update` check. Literals are the first ten lowercase base32 symbols of SHA-256 of a little-endian 64-bit index; prefix dictionaries append `.`. Worker initialization, deterministic SHAKE entropy, save callback, checked-key accounting and timer boundaries match the original history run.
+
+Steps 16-17 were measured in a later session with the same PACE 1.27.1, Windows 11, Ryzen 9 9950X3D, logical CPU 2 affinity, `GOAMD64=v1`, `GOMAXPROCS=1` and no PGO. Both builds passed their search-package tests. Ten serial one-second samples per workload per build alternated order, reversing it on each pair; all 120 samples were retained and reported zero allocations. Step 16 restores the baseline dependency inversion while retaining fingerprints; step 17 includes both accepted changes. The history harness and measurement session differ from the final-pass comparison above, so their samples are not pooled.
+
+| Step | Rare prefix | Frequent `ab.` | All hits | 64 anywhere | 512 anywhere | 512 prefixes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 16 | 40.18 | 49.36 | 7663 | 55.045 | 63.08 | 42.605 |
+| 17 | 39.21 | 48.52 | 7649 | 54.135 | 62.25 | 41.97 |
+
+Values are median ns per checked key; the graph shows full ranges. The unified CSV has **960 samples**: `run=history` selects the 600 plotted-history measurements, including the unplotted all-hit workload, while `run=final_comparison` selects the 360 baseline/retained measurements above. In the latter, stage 15 identifies `d01aa81` and stage 17 the final implementation. The `unit` column distinguishes search ns/key from arithmetic ns/op; blank sample columns mean unmeasured, never zero.
 
 ## Frequent-hit crossover
 
@@ -186,7 +252,7 @@ At threshold 128, the vector representation expands checks for many starts in sm
 | Ordinary 64 | about 586 µs | about 60 µs | 455.0 → 86.8 KiB |
 | Shared 32 | about 293 µs | about 27 µs | 228.5 → 38.0 KiB |
 
-These startup figures are bounded screens, not the five-sample search distributions. Retained dictionary storage is bounded by about 5 KiB fixed, 72 bytes per parsed pattern, 16 bytes per anchor and 16 bytes per occupied bucket, plus strings. Exact/signless matchers share that storage. Existing dictionaries of 128 or more eligible patterns use the same algorithm as before. Anchored-only indexing retains its separate threshold of 64 eligible patterns.
+These startup figures are bounded screens, not the five-sample search distributions. Dictionary storage is bounded by about 5 KiB fixed, 72 bytes per parsed pattern and 16 bytes per anchor, plus strings. The original 16-byte occupied bucket grows to 24 bytes with the final pass's fingerprints. Exact/signless matchers share that storage. Anchored-only indexing retains its separate threshold of 64 eligible patterns.
 
 ## Differential addition on twisted Edwards curves
 
@@ -277,9 +343,9 @@ This expression was independently checked against two Edwards doublings. Even wi
 | Four-lane radix-29 AVX2 | Independent arithmetic tests passed, but packed multiplication was roughly four times slower than four BMI2 products; no point backend was added. |
 | Larger projective batches | Small throughput gains did not justify increased state and cancellation work; the public batch remains 512 checked candidates. |
 
-## Current compiler comparison
+## Compiler comparison before the final pass
 
-Stock Go and PACE Go 1.27.1 were built from the same current source on Windows 11/amd64, Ryzen 9 9950X3D, with `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Five one-second samples per compiler were run serially, alternating compiler order. Both builds use the same production engine selection and native arithmetic/matching backends.
+Stock Go and PACE Go 1.27.1 were built from the same pre-final-pass source on Windows 11/amd64, Ryzen 9 9950X3D, with `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Five one-second samples per compiler were run serially, alternating compiler order. Both builds use the same production engine selection and native arithmetic/matching backends. These historical compiler timings precede fingerprints and divsteps; current PACE timings are above, while stock Go remains a compatibility target.
 
 | Full search | Go median [range], ns/key | PACE median [range], ns/key |
 | --- | ---: | ---: |
@@ -317,9 +383,11 @@ pace test -vet=off -pgo=off ./internal/pattern -run '^$' -bench '^BenchmarkCompi
 
 - Full `pace test -vet=off` and `go test -vet=off` suites passed, both native and `-tags purego`.
 - Dedicated square and in-place square are checked against `math/big` across the existing boundary matrix and 20,000 random full-width pairs. Batched reciprocal tests independently check both reconstructed inverses for 2,048 couplings. These cover noncanonical inputs as well as production point-derived values; multiplication's existing aliasing tests remain intact.
+- Divsteps inversion uses the same independent boundary/random references, including zero, `p`, `p+/-1`, `2p`, the maximum 256-bit input, canonical output, unchanged sources and in-place aliases. Another 1,024 inputs check every group's radix bounds, coefficient interval and modular congruences, then compare the terminal GCD with `math/big`.
+- Dictionary collision tests cover both fingerprint directions, every placement, byte mutations, mixed anchors, short fallbacks and padded boundaries. Sign-filter expectations use independent base32/string matching over both possible signs, not the production matcher as their oracle.
 - Complete paired keys were compared with independent scalar multiplication across two table transitions, interleaved reseeds, boundary scalars and epoch expiration. Formula tests include identity and torsion points. Saved-key tests verify signatures, nonce independence, immutable snapshots, both pending sides, exact-sign rejection, discarded-candidate accounting and zero allocations.
 - Cancellation, save failures and entropy failures retain their batch/error contracts. Existing Tor address vectors, expanded-key validation and file-format tests pass.
-- Earlier bounded PACE fuzzing covered paired generation, field arithmetic, sign filtering, strided dictionaries and anchored dictionaries in native and portable modes. After the arithmetic changes, four fresh runs used `-fuzztime=10s -parallel=1` and `GOMAXPROCS=1`: field arithmetic processed approximately 631,000 native and 645,000 portable inputs; paired generation processed 451,000 and 375,000 respectively, including invalid-length rejections.
+- Final bounded PACE fuzzing used `-fuzztime=10s -parallel=1` and `GOMAXPROCS=1` for field arithmetic, paired generation, strided dictionaries, sign filtering and anchored dictionaries, each native and `purego`. All ten runs passed, processing over 2.8 million inputs including invalid-length rejections.
 - Custom `vet` passed for native/purego and Linux amd64/arm64 and Darwin arm64 targets. A PACE Windows binary and stock-Go cross-builds succeeded; non-Windows binaries were not executed. Feature-poor hardware was not available, so the portable test matrix supplies fallback coverage.
 
 For example, run `pace test -vet=off ./internal/search -run '^$' -fuzz '^FuzzPaired$' -fuzztime=10s -parallel=1`, then repeat with `-tags purego`. The corresponding matcher targets are `FuzzSignFilter`, `FuzzDictionary` and `FuzzAnchoredDictionary`; arithmetic uses `FuzzFieldArithmetic`. The custom `vet --tests ./...` and `vet --tests --tags purego ./...` commands provide static checks without invoking stock vet separately.

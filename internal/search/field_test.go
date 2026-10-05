@@ -135,6 +135,14 @@ func checkFieldArithmetic(t *testing.T, left, right fieldElement) {
 
 	result.invert(&left)
 
+	if result != result.canonical() {
+		t.Fatal("inverse is not canonical")
+	}
+
+	if fieldInteger(left).Cmp(leftInteger) != 0 {
+		t.Fatal("inversion changed its source")
+	}
+
 	expected.ModInverse(leftInteger, prime)
 
 	if new(big.Int).Mod(leftInteger, prime).Sign() == 0 {
@@ -142,6 +150,11 @@ func checkFieldArithmetic(t *testing.T, left, right fieldElement) {
 	}
 
 	checkFieldResult(t, "invert", &result, expected)
+
+	result = left
+	result.invert(&result)
+
+	checkFieldResult(t, "in-place invert", &result, expected)
 }
 
 func checkFieldResult(t *testing.T, operation string, actual *fieldElement, expected *big.Int) {

@@ -58,7 +58,7 @@ func TestDictionaryAlignments(t *testing.T) {
 			forms := []string{literal, encoded[:start+length] + ".", "." + encoded[start:], encoded[:start+length] + "." + encoded[start:]}
 
 			if start > 0 && start+length < encodedSize {
-				forms = append(forms, "." + literal + ".")
+				forms = append(forms, "."+literal+".")
 			}
 
 			for _, text := range forms {
@@ -147,6 +147,45 @@ func TestDictionaryDifferential(t *testing.T) {
 
 	for range 1000 {
 		checkDictionary(t, matcher, shared, randomInput(random))
+	}
+}
+
+func TestDictionaryFingerprintCollisions(t *testing.T) {
+	patterns := dictionaryPatterns(64)
+
+	literals := []string{"aaabbb", "cccaaa", "aaaccc", "bbbaaa"}
+
+	patterns = append(patterns, literals...)
+	patterns = append(patterns, "aaabbb.", ".cccaaaq", "aaabbb.cccaaaq", "xyz", ".bc.")
+
+	matcher, err := CompilePatterns(patterns)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Shared triplets with different preceding/following symbols must not
+	// turn the union fingerprint into an accepting condition. Check every
+	// alignment, mutations outside the triplet, and both deferred signs.
+	for _, literal := range literals {
+		for start := 0; start+len(literal) < encodedSize; start++ {
+			text := strings.Repeat("z", start) + literal + strings.Repeat("z", encodedSize-start-len(literal)-1) + "q"
+
+			decoded, err := testEncoding.DecodeString(text)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			data := [32]byte(decoded)
+
+			checkDictionary(t, matcher, patterns, data)
+
+			for index := range data {
+				changed := data
+				changed[index] ^= 0xff
+
+				checkDictionary(t, matcher, patterns, changed)
+			}
+		}
 	}
 }
 
@@ -330,7 +369,7 @@ func checkDictionary(t *testing.T, matcher *Matcher, patterns []string, data [32
 	opposite := data
 	opposite[31] |= 0x80
 
-	want := matcher.Match(data) || matcher.Match(opposite)
+	want := referenceMatch(patterns, testEncoding.EncodeToString(data[:])) || referenceMatch(patterns, testEncoding.EncodeToString(opposite[:]))
 	if filter.Match(data) != want {
 		t.Fatalf("dictionary sign filter differs from union on %x", data)
 	}

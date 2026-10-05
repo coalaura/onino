@@ -52,23 +52,23 @@ The ordinary search path performs no heap allocations. The CLI sets `GOMAXPROCS(
 
 ## Benchmarks
 
-### Current compiler comparison
+### Current PACE performance
 
-Stock Go and PACE Go 1.27.1, built from the same current source, on Windows 11/amd64 and an AMD Ryzen 9 9950X3D. Both use `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Values are medians from five alternating one-second runs per compiler; lower ns/key is better.
+PACE Go 1.27.1 on Windows 11/amd64 and an AMD Ryzen 9 9950X3D, with `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Values are medians from ten alternating one-second runs against baseline `d01aa81`; lower ns/key is better. Stock Go and `purego` remain tested compatibility targets.
 
-| Workload | Go, ns/key | PACE, ns/key | PACE keys/second |
-| --- | ---: | ---: | ---: |
-| Full search, rare prefix | 42.99 | 40.88 | 24.46 million |
-| Full search, frequent `ab.` | 52.35 | 50.54 | 19.79 million |
-| Full search, every candidate hits | 7900 | 7800 | 128,200 |
-| Full search, 512 anywhere patterns | 88.57 | 70.66 | 14.15 million |
-| Full search, 512 shared-triplet patterns | 83.23 | 66.32 | 15.08 million |
-| Full search, 512 prefixes | 45.16 | 43.14 | 23.18 million |
-| Full search, 512 suffixes | 45.21 | 43.30 | 23.09 million |
+| Workload | PACE, ns/key | PACE keys/second |
+| --- | ---: | ---: |
+| Full search, rare prefix | 39.27 | 25.47 million |
+| Full search, frequent `ab.` | 48.55 | 20.60 million |
+| Full search, every candidate hits | 7652 | 130,700 |
+| Full search, 512 anywhere patterns | 62.10 | 16.10 million |
+| Full search, 512 shared-triplet patterns | 61.69 | 16.21 million |
+| Full search, 512 prefixes | 41.59 | 24.05 million |
+| Full search, 512 suffixes | 41.56 | 24.06 million |
 
-Both compilers report **0 B/op and 0 allocs/op** across all search samples. Rare-prefix samples ranged from 42.86-43.03 ns/key with Go and 40.69-42.15 with PACE. All-hit medians differ by about 1.3%, with overlapping ranges. These results describe one machine and use elapsed time on a pinned worker, rather than hardware-counter CPU accounting.
+All search samples report **0 B/op and 0 allocs/op**. Rare-prefix samples ranged from 39.26-39.74 ns/key; ordinary 512-pattern searches ranged from 62.03-62.89. Fingerprints and constant-time divsteps improve their throughput by 2.5% and 12.1% over the baseline. These are elapsed timings on one pinned worker; [research notes](RESEARCH.md#final-bounded-pass-fingerprints-and-divsteps) give full ranges, mixed workloads, memory costs and the historical compiler comparison.
 
-Full-search benchmarks include center transitions, matching, sign completion, statistics, discarded-candidate replenishment, immutable key snapshots and per-hit reseeding. They use reproducible SHAKE entropy and a cheap synchronous callback; startup, OS random acquisition, cancellation polling and disk persistence are outside the timed loop. Actual CLI throughput depends on hit rate and storage. With PACE, generation alone takes 38.73 ns/key for canonical Y or 62.52 ns/key for complete signed public keys.
+Full-search benchmarks include center transitions, matching, sign completion, statistics, discarded-candidate replenishment, immutable key snapshots and per-hit reseeding. They use reproducible SHAKE entropy and a cheap synchronous callback; startup, OS random acquisition, cancellation polling and disk persistence are outside the timed loop. Actual CLI throughput depends on hit rate and storage.
 
 To benchmark the production search loop:
 
@@ -81,11 +81,13 @@ Run benchmarks serially with `GOMAXPROCS=1`, `GOAMD64=v1` and consistent CPU aff
 
 ### Optimization history
 
-Sixteen cumulative milestones, built with the same PACE toolchain and measured with one full-search harness. Rare-prefix search went from **125.5 to 40.16 ns/key (3.13× throughput)**; a 512-pattern anywhere dictionary went from **348.3 to 69.58 ns/key (5.01×)**.
+Eighteen cumulative milestones were built with the same PACE toolchain and measured with one full-search harness, from the first batched engine through adjacent-symbol fingerprints and constant-time divsteps inversion. Rare-prefix search went from **125.5 to 39.21 ns/key (3.20x throughput)**; a 512-pattern anywhere dictionary went from **348.3 to 62.25 ns/key (5.60x)**.
 
-![Full-search performance across sixteen milestones, from the first batched projective engine through paired affine generation and dedicated squaring.](.github/performance-history.svg)
+![Full-search performance across eighteen milestones, from the first batched projective engine through dictionary fingerprints and constant-time divsteps inversion.](.github/performance-history.svg)
 
-Each point is the median of five one-second samples on the same pinned worker; whiskers show the full range. The graph preserves plateaus and regressions and the separate workloads expose matcher improvements that a rare-prefix-only curve would miss.
+Each point is the median of five one-second samples for steps 00-15 and ten for steps 16-17 on the same pinned worker; whiskers show the full range. The graph preserves every earlier measurement, including plateaus and regressions and extends all five series with the two retained improvements.
+
+The [performance history CSV](.github/performance-history.csv) contains every milestone's samples and the final-pass baseline comparison. The [measurement notes](RESEARCH.md#cumulative-performance-history) describe the later history run, including its progress-reporting check; the performance table above uses the separate final-pass comparison.
 
 ## Verification
 

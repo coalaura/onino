@@ -28,6 +28,10 @@ type tripletBucket struct {
 	positions uint64
 	first     uint32
 	end       uint32
+	// Union of one adjacent-symbol fingerprint per verifier. Either side
+	// may admit a candidate; only exact verification can accept it.
+	before uint32
+	after  uint32
 }
 
 type dictionaryCheck struct {
@@ -86,6 +90,19 @@ func (dictionary *tripletDictionary) matchTriplet(triplet uint16, position int, 
 
 	bucket := &dictionary.buckets[index]
 	if bucket.positions&(uint64(1)<<position) == 0 {
+		return false
+	}
+
+	// Stride-four anchors put adjacent symbols at 3 mod 4, never at the
+	// deferred sign symbol 49. A missing neighbor cannot satisfy its mask.
+	before := uint32(0)
+
+	if position != 0 {
+		before = uint32(1) << dictionarySymbol(data, position-1)
+	}
+
+	after := uint32(1) << dictionarySymbol(data, position+3)
+	if bucket.before&before == 0 && bucket.after&after == 0 {
 		return false
 	}
 
@@ -186,6 +203,19 @@ func compileDictionary(patterns []parsedPattern) *tripletDictionary {
 		bucket := tripletBucket{first: uint32(len(dictionary.checks))}
 
 		for _, check := range checks {
+			literal := anchorLiteral(*check.pattern)
+			offset := check.offset
+
+			if check.pattern.anchored && len(check.pattern.suffix) > len(check.pattern.prefix) {
+				offset -= encodedSize - len(check.pattern.suffix)
+			}
+
+			if offset+3 < len(literal) {
+				bucket.after |= uint32(1) << symbolValue(literal[offset+3])
+			} else {
+				bucket.before |= uint32(1) << symbolValue(literal[offset-1])
+			}
+
 			if check.pattern.anchored {
 				bucket.positions |= uint64(1) << check.offset
 			} else {
@@ -226,6 +256,19 @@ func anchorLiteral(pattern parsedPattern) string {
 
 func literalTriplet(literal string, offset int) uint16 {
 	return uint16(symbolValue(literal[offset]))<<10 | uint16(symbolValue(literal[offset+1]))<<5 | uint16(symbolValue(literal[offset+2]))
+}
+
+//go:inline
+func dictionarySymbol(data *[32]byte, position int) byte {
+	inputBit := position * 5
+	offset := inputBit / 8
+	word := uint16(data[offset]) << 8
+
+	if offset < 31 {
+		word |= uint16(data[offset+1])
+	}
+
+	return byte(word>>(11-inputBit%8)) & 31
 }
 
 //go:inline

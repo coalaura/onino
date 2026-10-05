@@ -189,12 +189,17 @@ func BenchmarkDictionarySearch(b *testing.B) {
 }
 
 func BenchmarkFullSearch(b *testing.B) {
+	mixed := append(benchmarkDictionary(512, false), "zzzzzz.", ".qqqqqqqa", "abcd.wxyza")
+	short := append(benchmarkDictionary(512, false), "xyz", ".bc.", "ab.")
+
 	cases := []benchmarkCase{
 		{name: "rare", patterns: []string{"somethingrare."}},
 		{name: "frequent", patterns: []string{"ab."}},
 		{name: "all_hits", patterns: []string{".a", ".q"}},
 		{name: "512", patterns: benchmarkDictionary(512, false)},
 		{name: "shared512", patterns: benchmarkDictionary(512, true)},
+		{name: "mixed512", patterns: mixed},
+		{name: "short512", patterns: short},
 	}
 
 	for _, test := range cases {

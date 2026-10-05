@@ -66,17 +66,7 @@ func (result *fieldElement) square(source *fieldElement) {
 }
 
 func (result *fieldElement) invert(source *fieldElement) {
-	// One inversion per batch: retain the established fixed addition chain,
-	// converting representations only at this cold boundary.
-	var encoded [32]byte
-
-	source.putBytes(&encoded)
-
-	value, _ := new(field.Element).SetBytes(encoded[:])
-
-	value.Invert(value)
-
-	result.setField(value)
+	result.invertDivsteps(source)
 }
 
 func (result *fieldElement) setField(source *field.Element) {

@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1070" viewBox="0 0 1200 1070" role="img" aria-labelledby="title description">
-	<title id="title">Onino search performance over sixteen cumulative milestones</title>
-	<desc id="description">Total nanoseconds per checked key, lower is better. Rare-prefix search falls from 125.5 to 40.16 ns/key, a 3.13-fold throughput increase. Searching 512 anywhere patterns falls from 348.3 to 69.58 ns/key, a 5.01-fold throughput increase. Dots are medians of five one-second samples; vertical whiskers show the full range. Both panels start at zero. Stage numbers follow implementation order, not elapsed time. Numerical results and reconstruction details accompany this image.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1030" viewBox="0 0 1200 1030" role="img" aria-labelledby="title description">
+	<title id="title">Onino search performance over eighteen cumulative milestones</title>
+	<desc id="description">Total nanoseconds per checked key, lower is better. Rare-prefix search falls from 125.5 to 39.21 ns/key, a 3.20-fold throughput increase. Searching 512 anywhere patterns falls from 348.3 to 62.25 ns/key, a 5.60-fold throughput increase. Dots are medians of five one-second samples for steps 00–15 and ten for steps 16–17; vertical whiskers show the full range. Both panels start at zero. Stage numbers follow implementation order, not elapsed time. Numerical results and measurement details accompany this image.</desc>
 	<style>
 		:root { color-scheme: light dark; }
 		text { fill: #64748b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 16px; }
@@ -33,7 +33,7 @@
 	<text x="44" y="65">PACE 1.27.1 · Ryzen 9 9950X3D · one pinned worker · lower is better</text>
 
 	<text class="section" x="44" y="108">SINGLE-PREFIX SEARCH</text>
-	<text class="summary" x="44" y="135">Rare prefix: 125.5 → 40.16 ns/key · 3.13× throughput</text>
+	<text class="summary" x="44" y="135">Rare prefix: 125.5 → 39.21 ns/key · 3.20× throughput</text>
 	<path d="M740,104h30" stroke="#3281d4" stroke-width="2.5"/>
 	<text x="780" y="109">Rare prefix</text>
 	<path d="M950,104h30" stroke="#be7818" stroke-width="2.5" stroke-dasharray="7 5"/>
@@ -47,54 +47,59 @@
 		<text x="62" y="360">0</text>
 	</g>
 	<g class="ticks" text-anchor="middle">
-		<text x="75" y="379">00</text><text x="141.67" y="379">01</text><text x="208.33" y="379">02</text><text x="275" y="379">03</text>
-		<text x="341.67" y="379">04</text><text x="408.33" y="379">05</text><text x="475" y="379">06</text><text x="541.67" y="379">07</text>
-		<text x="608.33" y="379">08</text><text x="675" y="379">09</text><text x="741.67" y="379">10</text><text x="808.33" y="379">11</text>
-		<text x="875" y="379">12</text><text x="941.67" y="379">13</text><text x="1008.33" y="379">14</text><text x="1075" y="379">15</text>
+		<text x="75" y="379">00</text><text x="133.82" y="379">01</text><text x="192.65" y="379">02</text><text x="251.47" y="379">03</text>
+		<text x="310.29" y="379">04</text><text x="369.12" y="379">05</text><text x="427.94" y="379">06</text><text x="486.76" y="379">07</text>
+		<text x="545.59" y="379">08</text><text x="604.41" y="379">09</text><text x="663.24" y="379">10</text><text x="722.06" y="379">11</text>
+		<text x="780.88" y="379">12</text><text x="839.71" y="379">13</text><text x="898.53" y="379">14</text><text x="957.35" y="379">15</text>
+		<text x="1016.18" y="379">16</text><text x="1075" y="379">17</text>
 	</g>
 	<g id="rare" class="series rare">
-		<path class="range" d="M75,187.53V187.8 M141.67,238.35V238.43 M208.33,247.11V247.36 M275,252.31V252.39 M341.67,252.29V252.37 M408.33,252.24V252.31 M475,252.13V252.39 M541.67,252.24V252.35 M608.33,254.15V254.25 M675,258.07V258.28 M741.67,291.55V291.6 M808.33,297.4V297.47 M875,295.27V295.31 M941.67,297.41V297.43 M1008.33,300.89V300.93 M1075,300.29V301.48"/>
-		<polyline points="75,187.67 141.67,238.41 208.33,247.32 275,252.39 341.67,252.31 408.33,252.27 475,252.33 541.67,252.24 608.33,254.23 675,258.25 741.67,291.57 808.33,297.44 875,295.29 941.67,297.41 1008.33,300.92 1075,301.45"/>
+		<path class="range" d="M75,187.53V187.8 M133.82,238.35V238.43 M192.65,247.11V247.36 M251.47,252.31V252.39 M310.29,252.29V252.37 M369.12,252.24V252.31 M427.94,252.13V252.39 M486.76,252.24V252.35 M545.59,254.15V254.25 M604.41,258.07V258.28 M663.24,291.55V291.6 M722.06,297.4V297.47 M780.88,295.27V295.31 M839.71,297.41V297.43 M898.53,300.89V300.93 M957.35,300.29V301.48 M1016.18,301.36V301.45 M1075,302.67V302.73"/>
+		<polyline points="75,187.67 133.82,238.41 192.65,247.32 251.47,252.39 310.29,252.31 369.12,252.27 427.94,252.33 486.76,252.24 545.59,254.23 604.41,258.25 663.24,291.57 722.06,297.44 780.88,295.29 839.71,297.41 898.53,300.92 957.35,301.45 1016.18,301.43 1075,302.72"/>
 		<circle cx="75" cy="187.67" r="3"/>
-		<circle cx="141.67" cy="238.41" r="3"/>
-		<circle cx="208.33" cy="247.32" r="3"/>
-		<circle cx="275" cy="252.39" r="3"/>
-		<circle cx="341.67" cy="252.31" r="3"/>
-		<circle cx="408.33" cy="252.27" r="3"/>
-		<circle cx="475" cy="252.33" r="3"/>
-		<circle cx="541.67" cy="252.24" r="3"/>
-		<circle cx="608.33" cy="254.23" r="3"/>
-		<circle cx="675" cy="258.25" r="3"/>
-		<circle cx="741.67" cy="291.57" r="3"/>
-		<circle cx="808.33" cy="297.44" r="3"/>
-		<circle cx="875" cy="295.29" r="3"/>
-		<circle cx="941.67" cy="297.41" r="3"/>
-		<circle cx="1008.33" cy="300.92" r="3"/>
-		<circle cx="1075" cy="301.45" r="3"/>
+		<circle cx="133.82" cy="238.41" r="3"/>
+		<circle cx="192.65" cy="247.32" r="3"/>
+		<circle cx="251.47" cy="252.39" r="3"/>
+		<circle cx="310.29" cy="252.31" r="3"/>
+		<circle cx="369.12" cy="252.27" r="3"/>
+		<circle cx="427.94" cy="252.33" r="3"/>
+		<circle cx="486.76" cy="252.24" r="3"/>
+		<circle cx="545.59" cy="254.23" r="3"/>
+		<circle cx="604.41" cy="258.25" r="3"/>
+		<circle cx="663.24" cy="291.57" r="3"/>
+		<circle cx="722.06" cy="297.44" r="3"/>
+		<circle cx="780.88" cy="295.29" r="3"/>
+		<circle cx="839.71" cy="297.41" r="3"/>
+		<circle cx="898.53" cy="300.92" r="3"/>
+		<circle cx="957.35" cy="301.45" r="3"/>
+		<circle cx="1016.18" cy="301.43" r="3"/>
+		<circle cx="1075" cy="302.72" r="3"/>
 	</g>
 	<g id="frequent" class="series frequent">
-		<path class="range" d="M75,177.53V177.93 M141.67,228.37V228.53 M208.33,237.29V237.49 M275,242.49V242.61 M341.67,242.36V242.51 M408.33,242.33V242.41 M475,242.32V242.56 M541.67,242.28V242.51 M608.33,244.28V244.41 M675,248.09V248.4 M741.67,279.21V279.31 M808.33,285.12V285.2 M875,283.04V283.11 M941.67,285.12V285.17 M1008.33,288.63V288.65 M1075,288.01V289.19"/>
-		<polyline points="75,177.8 141.67,228.49 208.33,237.44 275,242.6 341.67,242.47 408.33,242.36 475,242.52 541.67,242.44 608.33,244.39 675,248.39 741.67,279.29 808.33,285.16 875,283.09 941.67,285.16 1008.33,288.64 1075,289.08"/>
+		<path class="range" d="M75,177.53V177.93 M133.82,228.37V228.53 M192.65,237.29V237.49 M251.47,242.49V242.61 M310.29,242.36V242.51 M369.12,242.33V242.41 M427.94,242.32V242.56 M486.76,242.28V242.51 M545.59,244.28V244.41 M604.41,248.09V248.4 M663.24,279.21V279.31 M722.06,285.12V285.2 M780.88,283.04V283.11 M839.71,285.12V285.17 M898.53,288.63V288.65 M957.35,288.01V289.19 M1016.18,289.12V289.21 M1075,290.16V290.36"/>
+		<polyline points="75,177.8 133.82,228.49 192.65,237.44 251.47,242.6 310.29,242.47 369.12,242.36 427.94,242.52 486.76,242.44 545.59,244.39 604.41,248.39 663.24,279.29 722.06,285.16 780.88,283.09 839.71,285.16 898.53,288.64 957.35,289.08 1016.18,289.19 1075,290.31"/>
 		<circle cx="75" cy="177.8" r="3"/>
-		<circle cx="141.67" cy="228.49" r="3"/>
-		<circle cx="208.33" cy="237.44" r="3"/>
-		<circle cx="275" cy="242.6" r="3"/>
-		<circle cx="341.67" cy="242.47" r="3"/>
-		<circle cx="408.33" cy="242.36" r="3"/>
-		<circle cx="475" cy="242.52" r="3"/>
-		<circle cx="541.67" cy="242.44" r="3"/>
-		<circle cx="608.33" cy="244.39" r="3"/>
-		<circle cx="675" cy="248.39" r="3"/>
-		<circle cx="741.67" cy="279.29" r="3"/>
-		<circle cx="808.33" cy="285.16" r="3"/>
-		<circle cx="875" cy="283.09" r="3"/>
-		<circle cx="941.67" cy="285.16" r="3"/>
-		<circle cx="1008.33" cy="288.64" r="3"/>
-		<circle cx="1075" cy="289.08" r="3"/>
+		<circle cx="133.82" cy="228.49" r="3"/>
+		<circle cx="192.65" cy="237.44" r="3"/>
+		<circle cx="251.47" cy="242.6" r="3"/>
+		<circle cx="310.29" cy="242.47" r="3"/>
+		<circle cx="369.12" cy="242.36" r="3"/>
+		<circle cx="427.94" cy="242.52" r="3"/>
+		<circle cx="486.76" cy="242.44" r="3"/>
+		<circle cx="545.59" cy="244.39" r="3"/>
+		<circle cx="604.41" cy="248.39" r="3"/>
+		<circle cx="663.24" cy="279.29" r="3"/>
+		<circle cx="722.06" cy="285.16" r="3"/>
+		<circle cx="780.88" cy="283.09" r="3"/>
+		<circle cx="839.71" cy="285.16" r="3"/>
+		<circle cx="898.53" cy="288.64" r="3"/>
+		<circle cx="957.35" cy="289.08" r="3"/>
+		<circle cx="1016.18" cy="289.19" r="3"/>
+		<circle cx="1075" cy="290.31" r="3"/>
 	</g>
 
 	<text class="section" x="44" y="435">DICTIONARY SEARCH</text>
-	<text class="summary" x="44" y="461">512 anywhere: 348.3 → 69.58 ns/key · 5.01× throughput</text>
+	<text class="summary" x="44" y="461">512 anywhere: 348.3 → 62.25 ns/key · 5.60× throughput</text>
 	<path d="M585,430h30" stroke="#9a72d9" stroke-width="2.5"/>
 	<text x="625" y="435">512 anywhere</text>
 	<path d="M785,430h30" stroke="#d9764f" stroke-width="2.5" stroke-dasharray="9 4"/>
@@ -111,90 +116,100 @@
 		<text x="62" y="719">0</text>
 	</g>
 	<g class="ticks" text-anchor="middle">
-		<text x="75" y="738">00</text><text x="141.67" y="738">01</text><text x="208.33" y="738">02</text><text x="275" y="738">03</text>
-		<text x="341.67" y="738">04</text><text x="408.33" y="738">05</text><text x="475" y="738">06</text><text x="541.67" y="738">07</text>
-		<text x="608.33" y="738">08</text><text x="675" y="738">09</text><text x="741.67" y="738">10</text><text x="808.33" y="738">11</text>
-		<text x="875" y="738">12</text><text x="941.67" y="738">13</text><text x="1008.33" y="738">14</text><text x="1075" y="738">15</text>
+		<text x="75" y="738">00</text><text x="133.82" y="738">01</text><text x="192.65" y="738">02</text><text x="251.47" y="738">03</text>
+		<text x="310.29" y="738">04</text><text x="369.12" y="738">05</text><text x="427.94" y="738">06</text><text x="486.76" y="738">07</text>
+		<text x="545.59" y="738">08</text><text x="604.41" y="738">09</text><text x="663.24" y="738">10</text><text x="722.06" y="738">11</text>
+		<text x="780.88" y="738">12</text><text x="839.71" y="738">13</text><text x="898.53" y="738">14</text><text x="957.35" y="738">15</text>
+		<text x="1016.18" y="738">16</text><text x="1075" y="738">17</text>
 	</g>
 	<g id="dictionary512" class="series dictionary512">
-		<path class="range" d="M75,513.27V516.09 M141.67,532.99V536.44 M208.33,538.11V539.54 M275,540.64V541.27 M341.67,632.92V634.59 M408.33,647.07V648.28 M475,647.24V648.22 M541.67,652.07V652.88 M608.33,652.71V653.68 M675,651.38V655.47 M741.67,668.43V669.5 M808.33,671.08V671.98 M875,667.41V671.06 M941.67,671.52V672.2 M1008.33,672.85V673.81 M1075,673.47V674.16"/>
-		<polyline points="75,513.73 141.67,533.45 208.33,539.32 275,540.92 341.67,634.42 408.33,648.28 475,648.22 541.67,652.82 608.33,653.68 675,655.35 741.67,669.48 808.33,671.97 875,670.99 941.67,672.17 1008.33,673.76 1075,673.99"/>
+		<path class="range" d="M75,513.27V516.09 M133.82,532.99V536.44 M192.65,538.11V539.55 M251.47,540.64V541.27 M310.29,632.92V634.59 M369.12,647.07V648.28 M427.94,647.24V648.22 M486.76,652.07V652.88 M545.59,652.71V653.68 M604.41,651.38V655.47 M663.24,668.43V669.5 M722.06,671.08V671.98 M780.88,667.41V671.06 M839.71,671.52V672.2 M898.53,672.85V673.81 M957.35,673.47V674.16 M1016.18,676.62V677.77 M1075,676.65V678.3"/>
+		<polyline points="75,513.73 133.82,533.45 192.65,539.32 251.47,540.92 310.29,634.42 369.12,648.28 427.94,648.22 486.76,652.82 545.59,653.68 604.41,655.35 663.24,669.48 722.06,671.97 780.88,670.99 839.71,672.17 898.53,673.76 957.35,673.99 1016.18,677.73 1075,678.21"/>
 		<circle cx="75" cy="513.73" r="3"/>
-		<circle cx="141.67" cy="533.45" r="3"/>
-		<circle cx="208.33" cy="539.32" r="3"/>
-		<circle cx="275" cy="540.92" r="3"/>
-		<circle cx="341.67" cy="634.42" r="3"/>
-		<circle cx="408.33" cy="648.28" r="3"/>
-		<circle cx="475" cy="648.22" r="3"/>
-		<circle cx="541.67" cy="652.82" r="3"/>
-		<circle cx="608.33" cy="653.68" r="3"/>
-		<circle cx="675" cy="655.35" r="3"/>
-		<circle cx="741.67" cy="669.48" r="3"/>
-		<circle cx="808.33" cy="671.97" r="3"/>
-		<circle cx="875" cy="670.99" r="3"/>
-		<circle cx="941.67" cy="672.17" r="3"/>
-		<circle cx="1008.33" cy="673.76" r="3"/>
-		<circle cx="1075" cy="673.99" r="3"/>
+		<circle cx="133.82" cy="533.45" r="3"/>
+		<circle cx="192.65" cy="539.32" r="3"/>
+		<circle cx="251.47" cy="540.92" r="3"/>
+		<circle cx="310.29" cy="634.42" r="3"/>
+		<circle cx="369.12" cy="648.28" r="3"/>
+		<circle cx="427.94" cy="648.22" r="3"/>
+		<circle cx="486.76" cy="652.82" r="3"/>
+		<circle cx="545.59" cy="653.68" r="3"/>
+		<circle cx="604.41" cy="655.35" r="3"/>
+		<circle cx="663.24" cy="669.48" r="3"/>
+		<circle cx="722.06" cy="671.97" r="3"/>
+		<circle cx="780.88" cy="670.99" r="3"/>
+		<circle cx="839.71" cy="672.17" r="3"/>
+		<circle cx="898.53" cy="673.76" r="3"/>
+		<circle cx="957.35" cy="673.99" r="3"/>
+		<circle cx="1016.18" cy="677.73" r="3"/>
+		<circle cx="1075" cy="678.21" r="3"/>
 	</g>
 	<g id="dictionary64" class="series dictionary64">
-		<path class="range" d="M75,622.06V623.5 M141.67,644.14V645.29 M208.33,647.88V648.74 M275,649.49V651.04 M341.67,649.89V651.04 M408.33,649.83V650.98 M475,649.83V651.04 M541.67,648.05V650.98 M608.33,650.81V651.84 M675,644.48V653.63 M741.67,667.3V668.14 M808.33,669.7V670.69 M875,677.95V678.57 M941.67,679.39V680.06 M1008.33,680.95V681.59 M1075,681.37V681.87"/>
-		<polyline points="75,623.32 141.67,645.17 208.33,648.62 275,650.98 341.67,650.92 408.33,650.92 475,651.04 541.67,650.98 608.33,651.84 675,653.51 741.67,667.98 808.33,670.64 875,678.55 941.67,680.04 1008.33,681.59 1075,681.86"/>
+		<path class="range" d="M75,622.06V623.5 M133.82,644.14V645.29 M192.65,647.88V648.74 M251.47,649.49V651.04 M310.29,649.89V651.04 M369.12,649.83V650.98 M427.94,649.83V651.04 M486.76,648.05V650.98 M545.59,650.81V651.84 M604.41,644.48V653.63 M663.24,667.3V668.14 M722.06,669.7V670.69 M780.88,677.95V678.57 M839.71,679.39V680.06 M898.53,680.95V681.59 M957.35,681.37V681.87 M1016.18,681.61V682.37 M1075,682.09V682.92"/>
+		<polyline points="75,623.32 133.82,645.17 192.65,648.62 251.47,650.98 310.29,650.92 369.12,650.92 427.94,651.04 486.76,650.98 545.59,651.84 604.41,653.51 663.24,667.98 722.06,670.64 780.88,678.55 839.71,680.04 898.53,681.59 957.35,681.86 1016.18,682.35 1075,682.87"/>
 		<circle cx="75" cy="623.32" r="3"/>
-		<circle cx="141.67" cy="645.17" r="3"/>
-		<circle cx="208.33" cy="648.62" r="3"/>
-		<circle cx="275" cy="650.98" r="3"/>
-		<circle cx="341.67" cy="650.92" r="3"/>
-		<circle cx="408.33" cy="650.92" r="3"/>
-		<circle cx="475" cy="651.04" r="3"/>
-		<circle cx="541.67" cy="650.98" r="3"/>
-		<circle cx="608.33" cy="651.84" r="3"/>
-		<circle cx="675" cy="653.51" r="3"/>
-		<circle cx="741.67" cy="667.98" r="3"/>
-		<circle cx="808.33" cy="670.64" r="3"/>
-		<circle cx="875" cy="678.55" r="3"/>
-		<circle cx="941.67" cy="680.04" r="3"/>
-		<circle cx="1008.33" cy="681.59" r="3"/>
-		<circle cx="1075" cy="681.86" r="3"/>
+		<circle cx="133.82" cy="645.17" r="3"/>
+		<circle cx="192.65" cy="648.62" r="3"/>
+		<circle cx="251.47" cy="650.98" r="3"/>
+		<circle cx="310.29" cy="650.92" r="3"/>
+		<circle cx="369.12" cy="650.92" r="3"/>
+		<circle cx="427.94" cy="651.04" r="3"/>
+		<circle cx="486.76" cy="650.98" r="3"/>
+		<circle cx="545.59" cy="651.84" r="3"/>
+		<circle cx="604.41" cy="653.51" r="3"/>
+		<circle cx="663.24" cy="667.98" r="3"/>
+		<circle cx="722.06" cy="670.64" r="3"/>
+		<circle cx="780.88" cy="678.55" r="3"/>
+		<circle cx="839.71" cy="680.04" r="3"/>
+		<circle cx="898.53" cy="681.59" r="3"/>
+		<circle cx="957.35" cy="681.86" r="3"/>
+		<circle cx="1016.18" cy="682.35" r="3"/>
+		<circle cx="1075" cy="682.87" r="3"/>
 	</g>
 	<g id="prefix512" class="series prefix512">
-		<path class="range" d="M75,558.23V562.77 M141.67,578.01V581.46 M208.33,556.22V584.22 M275,552.42V584.86 M341.67,568.35V582.73 M408.33,588.02V590.38 M475,667.75V668.41 M541.67,667.67V668.42 M608.33,668.63V669.25 M675,670.24V670.96 M741.67,684.91V685.34 M808.33,687.39V687.87 M875,684.05V686.93 M941.67,687.34V687.86 M1008.33,688.97V689.37 M1075,689.17V689.63"/>
-		<polyline points="75,558.92 141.67,580.72 208.33,577.32 275,583.93 341.67,581.12 408.33,589.05 475,668.37 541.67,668.4 608.33,669.24 675,670.9 741.67,685.32 808.33,687.85 875,686.91 941.67,687.84 1008.33,689.35 1075,689.52"/>
+		<path class="range" d="M75,558.23V562.77 M133.82,578.01V581.46 M192.65,556.22V584.22 M251.47,552.42V584.86 M310.29,568.35V582.73 M369.12,588.02V590.38 M427.94,667.75V668.41 M486.76,667.67V668.42 M545.59,668.63V669.25 M604.41,670.24V670.96 M663.24,684.91V685.34 M722.06,687.39V687.87 M780.88,684.05V686.93 M839.71,687.34V687.86 M898.53,688.97V689.37 M957.35,689.17V689.63 M1016.18,688.57V689.53 M1075,688.88V690.1"/>
+		<polyline points="75,558.92 133.82,580.72 192.65,577.32 251.47,583.94 310.29,581.12 369.12,589.05 427.94,668.37 486.76,668.4 545.59,669.24 604.41,670.9 663.24,685.32 722.06,687.85 780.88,686.91 839.71,687.84 898.53,689.35 957.35,689.52 1016.18,689.5 1075,689.87"/>
 		<circle cx="75" cy="558.92" r="3"/>
-		<circle cx="141.67" cy="580.72" r="3"/>
-		<circle cx="208.33" cy="577.32" r="3"/>
-		<circle cx="275" cy="583.93" r="3"/>
-		<circle cx="341.67" cy="581.12" r="3"/>
-		<circle cx="408.33" cy="589.05" r="3"/>
-		<circle cx="475" cy="668.37" r="3"/>
-		<circle cx="541.67" cy="668.4" r="3"/>
-		<circle cx="608.33" cy="669.24" r="3"/>
-		<circle cx="675" cy="670.9" r="3"/>
-		<circle cx="741.67" cy="685.32" r="3"/>
-		<circle cx="808.33" cy="687.85" r="3"/>
-		<circle cx="875" cy="686.91" r="3"/>
-		<circle cx="941.67" cy="687.84" r="3"/>
-		<circle cx="1008.33" cy="689.35" r="3"/>
-		<circle cx="1075" cy="689.52" r="3"/>
+		<circle cx="133.82" cy="580.72" r="3"/>
+		<circle cx="192.65" cy="577.32" r="3"/>
+		<circle cx="251.47" cy="583.94" r="3"/>
+		<circle cx="310.29" cy="581.12" r="3"/>
+		<circle cx="369.12" cy="589.05" r="3"/>
+		<circle cx="427.94" cy="668.37" r="3"/>
+		<circle cx="486.76" cy="668.4" r="3"/>
+		<circle cx="545.59" cy="669.24" r="3"/>
+		<circle cx="604.41" cy="670.9" r="3"/>
+		<circle cx="663.24" cy="685.32" r="3"/>
+		<circle cx="722.06" cy="687.85" r="3"/>
+		<circle cx="780.88" cy="686.91" r="3"/>
+		<circle cx="839.71" cy="687.84" r="3"/>
+		<circle cx="898.53" cy="689.35" r="3"/>
+		<circle cx="957.35" cy="689.52" r="3"/>
+		<circle cx="1016.18" cy="689.5" r="3"/>
+		<circle cx="1075" cy="689.87" r="3"/>
 	</g>
 
 	<text class="section" x="44" y="783">CHANGES ADDED AT EACH STEP</text>
 	<g>
-		<text x="72" y="816"><tspan class="step">00</tspan><tspan x="111">First batched projective search</tspan></text>
-		<text x="72" y="843"><tspan class="step">01</tspan><tspan x="111">Four-limb BMI2/ADX arithmetic</tspan></text>
-		<text x="72" y="870"><tspan class="step">02</tspan><tspan x="111">Defer X/sign work until a filter hit</tspan></text>
-		<text x="72" y="897"><tspan class="step">03</tspan><tspan x="111">Fuse mixed point addition</tspan></text>
-		<text x="72" y="924"><tspan class="step">04</tspan><tspan x="111">Triplet-bucket dictionary matcher</tspan></text>
-		<text x="72" y="951"><tspan class="step">05</tspan><tspan x="111">Stride-four dictionary scanning</tspan></text>
-		<text x="72" y="978"><tspan class="step">06</tspan><tspan x="111">Indexed prefix/suffix matching</tspan></text>
-		<text x="72" y="1005"><tspan class="step">07</tspan><tspan x="111">Targeted PACE matcher inlining</tspan></text>
-		<text x="630" y="816"><tspan class="step">08</tspan><tspan x="669">Fuse reverse normalization</tspan></text>
-		<text x="630" y="843"><tspan class="step">09</tspan><tspan x="669">Assembly address displacements</tspan></text>
-		<text x="630" y="870"><tspan class="step">10</tspan><tspan x="669">Paired affine generation + fallback</tspan></text>
-		<text x="630" y="897"><tspan class="step">11</tspan><tspan x="669">Fuse paired arithmetic loops</tspan></text>
-		<text x="630" y="924"><tspan class="step">12</tspan><tspan x="669">Dictionary crossover: 128 → 32</tspan></text>
-		<text x="630" y="951"><tspan class="step">13</tspan><tspan x="669">Periodic progress reporting</tspan></text>
-		<text x="630" y="978"><tspan class="step">14</tspan><tspan x="669">Share paired reciprocal product</tspan></text>
-		<text x="630" y="1005"><tspan class="step">15</tspan><tspan x="669">Dedicated BMI2/ADX square</tspan></text>
+		<text x="44" y="816"><tspan class="step">00</tspan><tspan x="80">First batched projective search</tspan></text>
+		<text x="44" y="843"><tspan class="step">01</tspan><tspan x="80">Four-limb BMI2/ADX arithmetic</tspan></text>
+		<text x="44" y="870"><tspan class="step">02</tspan><tspan x="80">Defer X/sign work until a filter hit</tspan></text>
+		<text x="44" y="897"><tspan class="step">03</tspan><tspan x="80">Fuse mixed point addition</tspan></text>
+		<text x="44" y="924"><tspan class="step">04</tspan><tspan x="80">Triplet-bucket dictionary matcher</tspan></text>
+		<text x="44" y="951"><tspan class="step">05</tspan><tspan x="80">Stride-four dictionary scanning</tspan></text>
+		<text x="432" y="816"><tspan class="step">06</tspan><tspan x="468">Indexed prefix/suffix matching</tspan></text>
+		<text x="432" y="843"><tspan class="step">07</tspan><tspan x="468">Targeted PACE matcher inlining</tspan></text>
+		<text x="432" y="870"><tspan class="step">08</tspan><tspan x="468">Fuse reverse normalization</tspan></text>
+		<text x="432" y="897"><tspan class="step">09</tspan><tspan x="468">Assembly address displacements</tspan></text>
+		<text x="432" y="924"><tspan class="step">10</tspan><tspan x="468">Paired affine generation + fallback</tspan></text>
+		<text x="432" y="951"><tspan class="step">11</tspan><tspan x="468">Fuse paired arithmetic loops</tspan></text>
+		<text x="820" y="816"><tspan class="step">12</tspan><tspan x="856">Dictionary crossover: 128 → 32</tspan></text>
+		<text x="820" y="843"><tspan class="step">13</tspan><tspan x="856">Periodic progress reporting</tspan></text>
+		<text x="820" y="870"><tspan class="step">14</tspan><tspan x="856">Share paired reciprocal product</tspan></text>
+		<text x="820" y="897"><tspan class="step">15</tspan><tspan x="856">Dedicated BMI2/ADX square</tspan></text>
+		<text x="820" y="924"><tspan class="step">16</tspan><tspan x="856">Adjacent-symbol fingerprints</tspan></text>
+		<text x="820" y="951"><tspan class="step">17</tspan><tspan x="856">Constant-time divsteps inversion</tspan></text>
 	</g>
-	<text class="footer" x="44" y="1046">Dots: median of 5 × 1s samples · whiskers: min–max · 0 allocations · equal milestone spacing, not elapsed time</text>
+	<text class="footer" x="44" y="990">Dots: median · 5 × 1s samples at steps 00–15; 10 × 1s at 16–17 · whiskers: min–max · 0 allocations</text>
+	<text class="footer" x="44" y="1012">Same full-search harness · steps 16–17 measured in a later alternating run · equal milestone spacing, not elapsed time</text>
 </svg>
