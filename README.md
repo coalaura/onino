@@ -1,4 +1,8 @@
-# onino
+<picture>
+	<source media="(prefers-color-scheme: dark)" srcset=".github/banner.svg">
+	<source media="(prefers-color-scheme: light)" srcset=".github/banner-light.svg">
+	<img alt="onino — CPU-only vanity .onion search, with a purple racing onion forming the first o." src=".github/banner-light.svg">
+</picture>
 
 CPU-only vanity v3 `.onion` address search across the first **52 visible hostname characters**. onino matches public keys against compiled patterns and keeps searching after saving matches. It defaults to one worker; use `--cpu` for multicore search.
 
