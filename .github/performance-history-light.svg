@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 1120" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 1040" role="img" aria-labelledby="title desc">
 <title id="title">Single-worker optimization history — onino v0.2.0</title>
 <desc id="desc">Median nanoseconds per candidate, lower is better, with full-range whiskers. Historical stages 00–17 are preserved; 18 and 19 compare current AVX2 and auto modes with ten alternating pinned single-worker samples.</desc>
 <style>svg{color-scheme:light}text{font-family:Segoe UI,Arial,sans-serif;font-size:18px;fill:#475569}.title{font-size:32px;font-weight:600;fill:#1e293b}.heading{font-size:21px;font-weight:600;fill:#1e293b}.small{font-size:15px}.grid{stroke:#8592a3;stroke-opacity:0.22}.series{fill:none;stroke-width:3}.range{fill:none;stroke-width:1.5}</style>
@@ -95,20 +95,20 @@
 <text x="36" y="867">04  Triplet dictionary</text>
 <text x="36" y="894">05  Stride-four fingerprints</text>
 <text x="36" y="921">06  Indexed prefixes/suffixes</text>
-<text x="36" y="948">07  PACE targeted inlining</text>
-<text x="36" y="975">08  Fused reverse normalization</text>
-<text x="36" y="1002">09  Short address displacements</text>
-<text x="592" y="759">10  Paired generation</text>
-<text x="592" y="786">11  Fused paired loops</text>
-<text x="592" y="813">12  Dictionary threshold 128 → 32</text>
-<text x="592" y="840">13  Progress reporting</text>
-<text x="592" y="867">14  Shared paired reciprocal</text>
-<text x="592" y="894">15  Dedicated squaring</text>
-<text x="592" y="921">16  Neighbor fingerprints</text>
-<text x="592" y="948">17  Constant-time divsteps</text>
-<text x="592" y="975">18  v0.2.0: --simd avx2</text>
-<text x="592" y="1002">19  v0.2.0: --simd auto (AVX-512)</text>
-<text x="36" y="1051">Median with full-range whiskers. 00–15: 5 × 1 s; 16–17: 10 × 1 s.</text>
-<text x="36" y="1077">18–19: 10 alternating × 51.2M candidates; CPU 2 pinned, GOMAXPROCS=1, PGO off.</text>
-<text x="36" y="1103" class="small">No-op save; 0 allocations. Older points retained, not rerun. Unmeasured series stop at 17.</text>
+<text x="407" y="759">07  PACE targeted inlining</text>
+<text x="407" y="786">08  Fused reverse normalization</text>
+<text x="407" y="813">09  Short address displacements</text>
+<text x="407" y="840">10  Paired generation</text>
+<text x="407" y="867">11  Fused paired loops</text>
+<text x="407" y="894">12  Dictionary threshold 128 → 32</text>
+<text x="407" y="921">13  Progress reporting</text>
+<text x="778" y="759">14  Shared paired reciprocal</text>
+<text x="778" y="786">15  Dedicated squaring</text>
+<text x="778" y="813">16  Neighbor fingerprints</text>
+<text x="778" y="840">17  Constant-time divsteps</text>
+<text x="778" y="867">18  v0.2.0: --simd avx2</text>
+<text x="778" y="894">19  v0.2.0: --simd auto (AVX-512)</text>
+<text x="36" y="970">Median with full-range whiskers. 00–15: 5 × 1 s; 16–17: 10 × 1 s.</text>
+<text x="36" y="996">18–19: 10 alternating × 51.2M candidates; CPU 2 pinned, GOMAXPROCS=1, PGO off.</text>
+<text x="36" y="1022" class="small">No-op save; 0 allocations. Older points retained, not rerun. Unmeasured series stop at 17.</text>
 </svg>
