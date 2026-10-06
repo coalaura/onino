@@ -93,9 +93,9 @@ Each configuration ran five samples per workload, sequentially with rotating too
 
 Tested versions (2026-10-06):
 
-- onino v0.2.0 - current repository build ([`35b17e5`](https://github.com/coalaura/onino/commit/35b17e5)), PACE Go 1.27.1, `GOAMD64=v1`, PGO disabled.
-- [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom) - official Windows release.
-- [mkp224o v1.7.0](https://github.com/cathugger/mkp224o) - official Windows release.
+- [onino v0.2.0](https://github.com/coalaura/onino/releases/tag/v0.2.0) - PACE Go 1.27.1, `GOAMD64=v1`, PGO disabled.
+- [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom/releases/tag/v1.0.1) - official Windows release.
+- [mkp224o v1.7.0](https://github.com/cathugger/mkp224o/releases/tag/v1.7.0) - official Windows release.
 
 ## Optimization history
 
