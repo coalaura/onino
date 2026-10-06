@@ -25,10 +25,16 @@ type backendResult struct {
 }
 
 func backendFlags(flags []cli.Flag) []cli.Flag {
+	for _, flag := range flags {
+		if cpuFlag, ok := flag.(*cli.StringFlag); ok && cpuFlag.Name == "cpu" {
+			cpuFlag.Usage += "; 0 or off disables CPU search when GPU is enabled"
+		}
+	}
+
 	return append(flags, &cli.StringFlag{
 		Name:  "gpu",
 		Value: "off",
-		Usage: "Vulkan prefix search: off, auto, or physical device index; --cpu 0 selects GPU only",
+		Usage: "Vulkan prefix search: off, auto, or physical device index; --cpu 0 or --cpu off selects GPU only",
 	})
 }
 
@@ -48,11 +54,12 @@ func validateBackend(command *cli.Command) error {
 }
 
 func resolveWorkers(command *cli.Command, available int) (int, error) {
-	if command.String("gpu") != "off" && command.String("cpu") == "0" {
+	selection := command.String("cpu")
+	if command.String("gpu") != "off" && (selection == "0" || selection == "off") {
 		return 0, nil
 	}
 
-	return cpu.Resolve(command.String("cpu"), available)
+	return cpu.Resolve(selection, available)
 }
 
 func backendParallelism(command *cli.Command, workers int) int {
