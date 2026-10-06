@@ -63,7 +63,7 @@ Steady-state search and queue handoff perform no heap allocations; filesystem pe
 
 ## Benchmarks
 
-CPU-only prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 workers** and normal key-file output. The same onino binary was measured separately with `--simd avx2` and `--simd auto` (AVX-512 on this CPU). Onionloom used `--gpu off`. Rates are **million candidates/second**; higher is better.
+CPU-only prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 workers** and normal key-file output. `--simd auto` (AVX-512 on this CPU) was refreshed for onino v0.2.1; forced AVX2 and competitor results are retained from the previous comparison. Onionloom used `--gpu off`. Rates are **million candidates/second**; higher is better.
 
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/prefix-comparison.svg">
@@ -75,45 +75,45 @@ CPU-only prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 wo
 
 | Prefixes | onino AVX2 | onino auto | onionloom | mkp224o |
 | --- | ---: | ---: | ---: | ---: |
-| `hello` | 416.4 | **1,211.1** | 343.4 | 129.5 |
-| `privacy` | 422.9 | **1,247.7** | 345.2 | 130.3 |
-| `donate`, `mirror`, `secure` | 413.8 | **1,237.4** | 332.8 | 111.2 |
-| `somethingrare` (no matches) | 422.9 | **1,243.2** | 345.1 | 130.4 |
+| `hello` | 416.4 | **1,249.4** | 343.4 | 129.5 |
+| `privacy` | 422.9 | **1,290.5** | 345.2 | 130.3 |
+| `donate`, `mirror`, `secure` | 413.8 | **1,269.2** | 332.8 | 111.2 |
+| `somethingrare` (no matches) | 422.9 | **1,289.0** | 345.1 | 130.4 |
 
 **Min-max throughput**
 
 | Prefixes | onino AVX2 | onino auto | onionloom | mkp224o |
 | --- | ---: | ---: | ---: | ---: |
-| `hello` | 409.4-422.0 | 1,208.2-1,221.2 | 338.6-345.2 | 129.0-130.3 |
-| `privacy` | 419.2-424.8 | 1,240.1-1,252.2 | 341.7-345.8 | 129.5-131.4 |
-| `donate`, `mirror`, `secure` | 408.1-416.2 | 1,230.0-1,240.3 | 330.1-334.6 | 110.6-112.5 |
-| `somethingrare` (no matches) | 418.2-423.7 | 1,238.5-1,248.0 | 338.3-345.6 | 129.5-131.2 |
+| `hello` | 409.4-422.0 | 1,229.6-1,268.5 | 338.6-345.2 | 129.0-130.3 |
+| `privacy` | 419.2-424.8 | 1,242.8-1,303.0 | 341.7-345.8 | 129.5-131.4 |
+| `donate`, `mirror`, `secure` | 408.1-416.2 | 1,264.4-1,286.6 | 330.1-334.6 | 110.6-112.5 |
+| `somethingrare` (no matches) | 418.2-423.7 | 1,278.1-1,305.8 | 338.3-345.6 | 129.5-131.2 |
 
-Each configuration ran five samples per workload, sequentially with rotating tool order and all 32 logical CPUs available. Timed windows lasted 20-32 seconds after warm-up, bounded by progress reports; rates use cumulative candidate-count deltas over wall time, not peak displayed rates. Multiple prefixes match any listed prefix. The 13-character `somethingrare` prefix produced **zero matches and zero key files in every run**, isolating search throughput from match-saving I/O. One trial without a complete timed window was retained locally and rerun. [Raw samples](.github/prefix-comparison.csv) are available.
+Each configuration has five samples per workload, run sequentially with all 32 logical CPUs available. The original comparison rotated tool order; the v0.2.1 refresh ran only auto mode. Timed windows lasted 20-32 seconds after warm-up, bounded by progress reports; rates use cumulative candidate-count deltas over wall time, not peak displayed rates. Multiple prefixes match any listed prefix. The 13-character `somethingrare` prefix produced **zero matches and zero key files in every run**, isolating search throughput from match-saving I/O. Incomplete trials were excluded and rerun; four refreshed `hello` samples used temporary key-output directories after filesystem rename failures. [Raw samples](.github/prefix-comparison.csv) are available.
 
 Tested versions (2026-10-06):
 
-- [onino v0.2.0](https://github.com/coalaura/onino/releases/tag/v0.2.0) - PACE Go 1.27.1, `GOAMD64=v1`, PGO disabled.
+- onino v0.2.1 auto / [v0.2.0](https://github.com/coalaura/onino/releases/tag/v0.2.0) AVX2 - PACE Go 1.27.1, `GOAMD64=v1`, PGO disabled.
 - [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom/releases/tag/v1.0.1) - official Windows release.
 - [mkp224o v1.7.0](https://github.com/cathugger/mkp224o/releases/tag/v1.7.0) - official Windows release.
 
 ## Optimization history
 
-From the first batched engine to v0.2.0, rare-prefix search improved from **125.5 to 14.21 ns/key (8.83x throughput)** with AVX-512, while matching against 512 anywhere patterns improved from **348.3 to 40.73 ns/key (8.55x)**. Fresh measurements of the same binary with forced AVX2 give **39.22 ns/key** and **62.45 ns/key**, respectively.
+From the first batched engine to v0.2.1, rare-prefix search improved from **125.5 to 14.37 ns/key (8.74x throughput)** with AVX-512, while matching against 512 anywhere patterns improved from **348.3 to 41.32 ns/key (8.43x)**. Retained v0.2.0 forced-AVX2 measurements are **39.22 ns/key** and **62.45 ns/key**, respectively.
 
-| Single-worker search | `--simd avx2`, ns/key | `--simd auto`, ns/key |
+| Single-worker search | v0.2.0 `--simd avx2`, ns/key | v0.2.1 `--simd auto`, ns/key |
 | --- | ---: | ---: |
-| Rare prefix | 39.22 [39.19-40.22] | **14.21 [14.20-14.22]** |
-| Frequent prefix | 48.49 [48.47-48.55] | **23.46 [23.44-23.46]** |
-| 512 anywhere patterns | 62.45 [62.41-62.50] | **40.73 [40.70-40.82]** |
+| Rare prefix | 39.22 [39.19-40.22] | **14.37 [14.27-14.48]** |
+| Frequent prefix | 48.49 [48.47-48.55] | **23.73 [23.69-23.75]** |
+| 512 anywhere patterns | 62.45 [62.41-62.50] | **41.32 [41.23-41.52]** |
 
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/performance-history.svg">
 	<source media="(prefers-color-scheme: light)" srcset=".github/performance-history-light.svg">
-	<img alt="Single-worker search performance across eighteen historical milestones plus fresh v0.2.0 AVX2 and AVX-512 measurements, with median points and full-range whiskers." src=".github/performance-history-light.svg">
+	<img alt="Single-worker search performance through v0.2.1 AVX-512, retaining the earlier milestones and v0.2.0 comparison, with median points and full-range whiskers." src=".github/performance-history-light.svg">
 </picture>
 
-Each point shows median single-worker performance; brackets and whiskers show the full measured range, including plateaus and regressions. The two current modes used ten alternating samples of 51.2 million candidates each, pinned to logical CPU 2 with `GOMAXPROCS=1`, `-cpu=1` and PGO disabled. These in-process searches use deterministic entropy and a no-op save callback; all measured zero allocations. Historical points are preserved, not rerun. The [research notes](RESEARCH.md#cumulative-performance-history) cover the earlier experiments, with [raw samples](.github/performance-history.csv) available separately.
+Each point shows median single-worker performance; brackets and whiskers show the full measured range, including plateaus and regressions. The v0.2.1 auto refresh used ten samples of 51.2 million candidates per workload after warm-up, pinned to logical CPU 2 with `GOMAXPROCS=1`, `-cpu=1`, `-parallel=1` and PGO disabled. These in-process searches use deterministic entropy and a no-op save callback; all measured zero allocations. Historical points are preserved, including the ten alternating v0.2.0 AVX2/auto samples. The new single-worker results are slightly slower than those earlier auto samples; this refresh is not a paired version comparison. The [research notes](RESEARCH.md#cumulative-performance-history) cover the earlier experiments, with [raw samples](.github/performance-history.csv) available separately.
 
 ## Verification
 
