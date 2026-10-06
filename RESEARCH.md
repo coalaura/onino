@@ -186,6 +186,26 @@ PACE instruction inspection confirmed actual IFMA/EVEX instructions, zero-frame 
 
 These findings apply to this single CPU and single-worker setup. **Multicore performance is unmeasured in this pass.** SMT behavior, multicore scaling, sustained all-core frequency/power and CPU-specific width policies are deferred to a later controlled environment. No all-core throughput is extrapolated from SIMD lanes or these timings. Historical multicore evidence below predates this extension and does not validate its multicore behavior.
 
+## Fused paired generation and prefix filtering
+
+This final CPU pass starts from clean `e743e57666d31ea963bcfbd66fa186708853181e`. One eight-center AVX-512F+IFMA leaf now combines numerator addition/subtraction, both Y multiplications, canonical first-word filtering and plus/minus mask interleaving. The minus numerator stays in registers across the plus calculation. The full five-limb carry test determines canonical reduction before filtering, but upper canonical carries and masked coordinate stores run only when that side has survivors. The Go caller serializes set bits in existing candidate order. Reciprocals, deferred sign recovery, reseeding, accounting and runtime dispatch retain their existing contracts; AVX2 and portable implementations are untouched.
+
+On the Ryzen 9 9950X3D, Windows/amd64, PACE Go 1.27.1, `GOAMD64=v1`, PGO off, CPU 2, `GOMAXPROCS=1`, `-cpu=1` and `-parallel=1`, ten alternating baseline/final pairs after warming both binaries gave these medians. Complete searches use identical deterministic SHAKE streams and 51,200,000 checked candidates per sample; the primitive uses ten million sixteen-candidate groups. Throughput change is baseline time divided by candidate time minus one.
+
+| Workload | Baseline | Fused | Throughput change |
+| --- | ---: | ---: | ---: |
+| Rare single prefix | 14.2666 ns/key | 14.0361 ns/key | +1.64% |
+| Three prefixes | 14.3281 ns/key | 14.1484 ns/key | +1.27% |
+| Fifty-character prefix | 14.2666 ns/key | 14.0361 ns/key | +1.64% |
+| Frequent `ab.` hits | 23.5977 ns/key | 23.3115 ns/key | +1.23% |
+| Paired/filter primitive | 44.640 ns/group | 36.955 ns/group | +20.80% |
+
+The retained component is this bounded fusion with deferred materialization and an empty-mask fast return. An initial version that completed every canonical carry and always interleaved masks won only about 0.25% on rare/long searches and did not improve the three-prefix case; it was superseded. An earlier ten-pair confirmation of the retained arithmetic measured +1.24-1.59% for rare/three/long and only +0.12% for frequent hits, so the frequent-hit gain is less stable. Wider fusion was not pursued. Separate profiles still place roughly half the samples in forward/reverse preparation. Generated PACE instructions contain 100 IFMA instructions, 20 vector input loads, at most ten masked output stores, no calls or stack spills and no reserved-register clobbers. The caller's stack frame shrinks from 1128 to 720 bytes.
+
+Differential tests expose all sixteen canonical outputs with an all-survivor plan, then compare every selective mask and untouched rejected lane against the old six-call path and independent scalar arithmetic. Coverage includes noncanonical/carry edges, no/all/sparse survivors, multiple/long prefixes, exact long-prefix rejection after a first-word match, table transitions, epoch reseeding, sibling invalidation, save/reseed failures, cancellation and exact counters. Saved keys are independently checked by scalar-base multiplication, signatures and hostname checksums. PACE/stock-Go native and PACE purego suites pass with `-vet=off`; custom vet passes on Windows/Linux/Darwin amd64.
+
+Retention is based on PACE complete-search gains, not the primitive alone. Ten-pair forced-AVX2 controls varied by -0.09% to +0.15% throughput and dictionary, independent-walk, anywhere and all-hit controls were close to baseline. Two longer ten-pair follow-ups confirmed unresolved costs: stock Go's three-prefix search is 0.56% slower (7434.5 → 7476 ns/batch) and the unchanged three-character suffix workload is 0.25% slower (9129 → 9151.5 ns/batch). Their causes are not established and this is not a zero-regression claim.
+
 ## Multicore search
 
 ### Ownership and coordination
@@ -715,14 +735,11 @@ The first screen reproduces one pinned logical CPU (CPU 2, affinity mask 4), `GO
 
 Worker validation uses the existing production coordinator, deterministic per-worker streams, spread physical-core-first pinning, a 200 ms warm-up per worker and synchronized start. Four alternating pairs use three seconds per workload at 1, 16 and 32 workers. These are process-level throughput measurements, so they should not be compared directly with the pinned batch-loop timings. Final CLI validation uses four alternating ten-second pairs at 32 workers, normal secure entropy and normal filesystem persistence. The helper sends a Windows process-group CTRL_BREAK for graceful final counters. Rates use all checked keys over elapsed time, never time-to-first-match.
 
-### Reproduction
+### Build and verification commands
 
-Run from the repository root using the scripts under `internal/search/testdata/anchored/`. Build the fixture baseline before changing `pattern.go`/`pattern_compile.go`, with `GOAMD64=v1` and `pace test -vet=off -pgo=off -c ./internal/search`; the original binaries precede even those fixture edits. Add `-tags measure` for the opt-in worker harness. The temporary shared-mask and explicit-comparison variants were removed after evaluation. Raw per-key samples remain recorded below.
+Build the fixture baseline before changing `pattern.go`/`pattern_compile.go`, with `GOAMD64=v1` and `pace test -vet=off -pgo=off -c ./internal/search`; the original binaries precede even those fixture edits. Add `-tags measure` for the opt-in worker harness. The temporary shared-mask and explicit-comparison variants were removed after evaluation. Raw per-key samples remain recorded below.
 
 ```powershell
-$single = 'internal/search/testdata/anchored/measure-single.ps1'
-& $single -Baseline $Baseline -Candidate $Candidate -Name anchored-screen -Bench '^Benchmark(AnchoredSearch|FullSearch|SuffixCosts)$' -Time 350ms -Count 6 -Affinity 4
-& $single -Baseline $Baseline -Candidate $Candidate -Name anchored-confirm -Bench '^BenchmarkAnchoredSearch$/(donate|privacy|rare|three6|three7)$' -Time 2s -Count 6 -Affinity 4
 pace tool objdump -s searchBatch $Baseline
 pace tool objdump -s searchBatch $Candidate
 pace test -vet=off -pgo=off ./...
@@ -734,7 +751,6 @@ vet --os linux
 vet --os darwin
 vet --tests --tags purego --os windows ./...
 vet --tests --tags measure --os windows ./...
-vet --os windows ./internal/search/testdata/anchored
 ```
 
 ### Correctness and allocation results
@@ -975,9 +991,6 @@ pace test -vet=off -pgo=off -c -o $Baseline ./internal/search
 # Build after implementing the queue.
 pace test -vet=off -pgo=off -c -o $Candidate ./internal/search
 pace test -vet=off -pgo=off -tags measure -c -o $WorkerBinary ./internal/search
-./internal/search/testdata/anchored/measure-single.ps1 -Baseline $Baseline -Candidate $Candidate -Name queued-miss -Bench '^BenchmarkAnchoredSearch/(donate|privacy|rare|three6)$' -Time 1s -Count 4
-./internal/search/testdata/anchored/measure-workers.ps1 -Baseline $WorkerBinary -Candidate $WorkerBinary -CandidateMode queued -Name queued-workers -Workloads "rare,three6,persist_prefix" -Workers "1,32" -Seconds 3 -Pairs 4
-./internal/search/testdata/anchored/measure-workers.ps1 -Baseline $WorkerBinary -Candidate $WorkerBinary -CandidateMode queued -Name queued-single-persistence -Workloads persist_prefix -Workers 1 -Seconds 10 -Pairs 4
 pace test -vet=off -pgo=off ./...
 pace test -vet=off -pgo=off -tags purego ./...
 go test -vet=off -pgo=off ./...

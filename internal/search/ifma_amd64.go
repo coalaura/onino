@@ -66,3 +66,11 @@ func ifmaReverse(scratch *[pairedCenters / ifmaLanes]ifmaScratch, inverse, facto
 //go:noescape
 //go:abiinternal value=AX plan=BX -> mask=AX
 func ifmaCanonicalFilter(value *ifmaElement, plan *pattern.PrefixPlan) (mask uint64)
+
+// ifmaPairedFilter leaves scratch intact and writes canonical limbs only for
+// survivors. Output buffers must not alias scratch or each other. Plan.Count
+// must be in [1, 8]. Bit 2*lane is plus; bit 2*lane+1 is minus.
+//
+//go:noescape
+//go:abiinternal plus=AX minus=BX scratch=CX plan=DI -> mask=AX
+func ifmaPairedFilter(plus, minus *ifmaElement, scratch *ifmaScratch, plan *pattern.PrefixPlan) (mask uint64)

@@ -6,6 +6,7 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"io"
+	"math/bits"
 
 	"filippo.io/edwards25519"
 	"github.com/coalaura/onino/internal/pattern"
@@ -206,41 +207,29 @@ func (state *ifmaGenerator) nextFilteredBatch() error {
 	state.cursor = 0
 
 	var (
-		numerator ifmaElement
-		plus      ifmaElement
-		minus     ifmaElement
+		plus  ifmaElement
+		minus ifmaElement
 	)
 
 	for index := range state.scratch {
 		scratch := &state.scratch[index]
 
-		ifmaAdd(&numerator, &scratch.b, &scratch.a)
-		ifmaMultiply(&plus, &numerator, &scratch.plusInverse)
-		ifmaSubtract(&numerator, &scratch.b, &scratch.a)
-		ifmaMultiply(&minus, &numerator, &scratch.minusInverse)
+		mask := ifmaPairedFilter(&plus, &minus, scratch, &state.plan)
+		state.masks[index] = uint16(mask)
 
-		plusMask := ifmaCanonicalFilter(&plus, &state.plan)
-		minusMask := ifmaCanonicalFilter(&minus, &state.plan)
+		for mask != 0 {
+			candidate := bits.TrailingZeros64(mask)
+			ordinate := &plus
 
-		var mask uint16
-
-		for lane := range ifmaLanes {
-			if plusMask>>lane&1 != 0 {
-				ordinate := plus.lane(lane)
-				ordinate.putBytes(&state.publicKeys[index*ifmaLanes*2+lane*2])
-
-				mask |= 1 << (lane * 2)
+			if candidate&1 != 0 {
+				ordinate = &minus
 			}
 
-			if minusMask>>lane&1 != 0 {
-				ordinate := minus.lane(lane)
-				ordinate.putBytes(&state.publicKeys[index*ifmaLanes*2+lane*2+1])
+			value := ordinate.lane(candidate / 2)
+			value.putBytes(&state.publicKeys[index*ifmaLanes*2+candidate])
 
-				mask |= 1 << (lane*2 + 1)
-			}
+			mask &= mask - 1
 		}
-
-		state.masks[index] = mask
 	}
 
 	return nil
