@@ -63,49 +63,57 @@ Steady-state search and queue handoff perform no heap allocations; filesystem pe
 
 ## Benchmarks
 
-CPU-only prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 workers** and normal key-file output. Onionloom used `--gpu off`. Rates are **million candidates/second**; higher is better.
+CPU-only prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 workers** and normal key-file output. The same onino binary was measured separately with `--simd avx2` and `--simd auto` (AVX-512 on this CPU). Onionloom used `--gpu off`. Rates are **million candidates/second**; higher is better.
 
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/prefix-comparison.svg">
 	<source media="(prefers-color-scheme: light)" srcset=".github/prefix-comparison-light.svg">
-	<img alt="Median CPU-only throughput for onino, onionloom and mkp224o across the same three prefix workloads, shown as grouped bars on a shared zero-based scale." src=".github/prefix-comparison-light.svg">
+	<img alt="Median CPU-only throughput for onino AVX2, onino auto, onionloom and mkp224o across four prefix workloads, including a no-match case, on a shared zero-based scale." src=".github/prefix-comparison-light.svg">
 </picture>
 
 **Median throughput**
 
-| Prefixes | onino | onionloom | mkp224o |
-| --- | ---: | ---: | ---: |
-| `hello` | **412.8** | 338.5 | 129.8 |
-| `privacy` | **421.5** | 342.8 | 128.7 |
-| `donate`, `mirror`, `secure` | **379.5** | 324.6 | 110.4 |
+| Prefixes | onino AVX2 | onino auto | onionloom | mkp224o |
+| --- | ---: | ---: | ---: | ---: |
+| `hello` | 416.4 | **1,211.1** | 343.4 | 129.5 |
+| `privacy` | 422.9 | **1,247.7** | 345.2 | 130.3 |
+| `donate`, `mirror`, `secure` | 413.8 | **1,237.4** | 332.8 | 111.2 |
+| `somethingrare` (no matches) | 422.9 | **1,243.2** | 345.1 | 130.4 |
 
 **Min-max throughput**
 
-| Prefixes | onino | onionloom | mkp224o |
-| --- | ---: | ---: | ---: |
-| `hello` | 410.7-416.5 | 334.9-340.7 | 129.5-129.8 |
-| `privacy` | 417.2-422.8 | 342.0-342.9 | 128.3-130.1 |
-| `donate`, `mirror`, `secure` | 377.8-379.8 | 323.6-327.4 | 108.9-111.0 |
+| Prefixes | onino AVX2 | onino auto | onionloom | mkp224o |
+| --- | ---: | ---: | ---: | ---: |
+| `hello` | 409.4-422.0 | 1,208.2-1,221.2 | 338.6-345.2 | 129.0-130.3 |
+| `privacy` | 419.2-424.8 | 1,240.1-1,252.2 | 341.7-345.8 | 129.5-131.4 |
+| `donate`, `mirror`, `secure` | 408.1-416.2 | 1,230.0-1,240.3 | 330.1-334.6 | 110.6-112.5 |
+| `somethingrare` (no matches) | 418.2-423.7 | 1,238.5-1,248.0 | 338.3-345.6 | 129.5-131.2 |
 
-Each tool ran three ~20-second samples per workload after warm-up. Multiple prefixes match any listed prefix. [Raw samples](.github/prefix-comparison.csv) are available.
+Each configuration ran five samples per workload, sequentially with rotating tool order and all 32 logical CPUs available. Timed windows lasted 20-32 seconds after warm-up, bounded by progress reports; rates use cumulative candidate-count deltas over wall time, not peak displayed rates. Multiple prefixes match any listed prefix. The 13-character `somethingrare` prefix produced **zero matches and zero key files in every run**, isolating search throughput from match-saving I/O. One trial without a complete timed window was retained locally and rerun. [Raw samples](.github/prefix-comparison.csv) are available.
 
-Tested versions (2026-10-05):
+Tested versions (2026-10-06):
 
-- [onino v0.1.0](https://github.com/coalaura/onino/releases/tag/v0.1.0) - built with PACE Go 1.27.1.
+- onino v0.2.0 - current repository build ([`35b17e5`](https://github.com/coalaura/onino/commit/35b17e5)), PACE Go 1.27.1, `GOAMD64=v1`, PGO disabled.
 - [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom) - official Windows release.
 - [mkp224o v1.7.0](https://github.com/cathugger/mkp224o) - official Windows release.
 
 ## Optimization history
 
-Across eighteen optimization milestones, rare-prefix search improved from **125.5 to 39.21 ns/key (3.20x throughput)**, while matching against 512 anywhere patterns improved from **348.3 to 62.25 ns/key (5.60x)**.
+From the first batched engine to v0.2.0, rare-prefix search improved from **125.5 to 14.21 ns/key (8.83x throughput)** with AVX-512, while matching against 512 anywhere patterns improved from **348.3 to 40.73 ns/key (8.55x)**. Fresh measurements of the same binary with forced AVX2 give **39.22 ns/key** and **62.45 ns/key**, respectively.
+
+| Single-worker search | `--simd avx2`, ns/key | `--simd auto`, ns/key |
+| --- | ---: | ---: |
+| Rare prefix | 39.22 [39.19-40.22] | **14.21 [14.20-14.22]** |
+| Frequent prefix | 48.49 [48.47-48.55] | **23.46 [23.44-23.46]** |
+| 512 anywhere patterns | 62.45 [62.41-62.50] | **40.73 [40.70-40.82]** |
 
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/performance-history.svg">
 	<source media="(prefers-color-scheme: light)" srcset=".github/performance-history-light.svg">
-	<img alt="Full-search performance across eighteen milestones, from the first batched projective engine through dictionary fingerprints and constant-time divsteps inversion." src=".github/performance-history-light.svg">
+	<img alt="Single-worker search performance across eighteen historical milestones plus fresh v0.2.0 AVX2 and AVX-512 measurements, with median points and full-range whiskers." src=".github/performance-history-light.svg">
 </picture>
 
-Each point shows median single-worker performance; whiskers show the full measured range, including plateaus and regressions. The [research notes](RESEARCH.md#cumulative-performance-history) cover the experiments and methodology, with [raw measurements](.github/performance-history.csv) available separately.
+Each point shows median single-worker performance; brackets and whiskers show the full measured range, including plateaus and regressions. The two current modes used ten alternating samples of 51.2 million candidates each, pinned to logical CPU 2 with `GOMAXPROCS=1`, `-cpu=1` and PGO disabled. These in-process searches use deterministic entropy and a no-op save callback; all measured zero allocations. Historical points are preserved, not rerun. The [research notes](RESEARCH.md#cumulative-performance-history) cover the earlier experiments, with [raw samples](.github/performance-history.csv) available separately.
 
 ## Verification
 
