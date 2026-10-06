@@ -47,7 +47,7 @@ type measureConfig struct {
 // TestMeasureMulticore is an opt-in bounded experiment, not part of the ordinary
 // test suite. A single startup gate excludes initialization and a 200ms warm-up
 // per worker. Production uses the actual coordinator/worker loop; reference has
-// only independent batch loops and local counters. No recurring gates or queues.
+// only independent batch loops and local counters. Queued uses the bounded saver.
 func TestMeasureMulticore(t *testing.T) {
 	requested := os.Getenv("ONINO_MEASURE")
 	if requested == "" {
@@ -163,6 +163,8 @@ func measureSearch(t *testing.T, config measureConfig) measurement {
 		patterns = benchmarkDictionary(512, true)
 	case "all_hits", "persistence":
 		patterns = allSuffixPatterns(1)
+	case "persist_prefix":
+		patterns = []string{"abcd."}
 	default:
 		found := false
 
@@ -191,7 +193,7 @@ func measureSearch(t *testing.T, config measureConfig) measurement {
 
 	save := SaveFunc(cheapSave)
 
-	if config.workload == "persistence" {
+	if config.workload == "persistence" || config.workload == "persist_prefix" {
 		if config.mode == "reference" {
 			t.Fatal("persistence requires serialized production callbacks")
 		}
@@ -221,7 +223,7 @@ func measureSearch(t *testing.T, config measureConfig) measurement {
 	hooks.create = func(index int, matcher *pattern.Matcher) (*worker, error) {
 		state, err := deterministicWorker(index, matcher)
 
-		if config.workload == "persistence" {
+		if config.workload == "persistence" || config.workload == "persist_prefix" {
 			state, err = createSecureWorker(index, matcher)
 		}
 
@@ -248,7 +250,7 @@ func measureSearch(t *testing.T, config measureConfig) measurement {
 
 	if config.mode == "progress" {
 		options.Progress = func(Stats) {}
-	} else if config.mode != "parallel" && config.mode != "reference" {
+	} else if config.mode != "parallel" && config.mode != "reference" && config.mode != "queued" {
 		t.Fatalf("unknown mode %q", config.mode)
 	}
 
@@ -258,9 +260,14 @@ func measureSearch(t *testing.T, config measureConfig) measurement {
 			err   error
 		)
 
-		if config.mode == "reference" {
+		switch config.mode {
+		case "reference":
 			stats, err = independentSearch(ctx, matcher, options, hooks)
-		} else {
+		case "queued":
+			stats, err = runQueued(ctx, matcher, func(key onion.Key, _ time.Time) error {
+				return save(key)
+			}, options, hooks)
+		default:
 			stats, err = runParallel(ctx, matcher, save, options, hooks)
 		}
 

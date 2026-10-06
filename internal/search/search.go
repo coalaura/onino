@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/coalaura/onino/internal/onion"
@@ -34,14 +33,12 @@ func (state *generator) searchBatch(matcher *pattern.Matcher, save SaveFunc, sta
 			continue
 		}
 
-		err := save(state.key(index))
+		err := state.sink.submit(state.snapshot(index), save, stats)
 		if err != nil {
-			return fmt.Errorf("save matching key: %w", err)
+			return err
 		}
 
-		stats.Saved++
-
-		// Each saved lane must start a new independent walk before advancing.
+		// Each accepted lane must start a new independent walk before advancing.
 		err = state.reseed(index)
 		if err != nil {
 			return err

@@ -18,7 +18,7 @@ const publishBatches = 128
 
 // Options selects persistent search workers. An empty CPUs slice leaves
 // placement to the OS; otherwise it must contain one distinct CPU per worker.
-// Progress and save callbacks are synchronous and never overlap. Callbacks must
+// Progress and save callbacks are serialized and never overlap. Callbacks must
 // return for shutdown to complete; cancellation does not interrupt a save.
 type Options struct {
 	Workers  int
@@ -48,6 +48,7 @@ type parallelRun struct {
 	hooks     parallelHooks
 	slots     []counterSlot
 	done      chan struct{}
+	queue     *saveQueue
 	callbacks sync.Mutex
 	failure   sync.Mutex
 	stopped   atomic.Bool
@@ -63,6 +64,10 @@ func (slot *counterSlot) publish(stats Stats) {
 
 func (run *parallelRun) totals() Stats {
 	var stats Stats
+
+	if run.queue != nil {
+		stats.Saved = run.queue.saved.Load()
+	}
 
 	for index := range run.slots {
 		// Read saved first so a snapshot never counts a save before its check.
@@ -142,6 +147,16 @@ func (run *parallelRun) work(index int) {
 	save := run.saveKey
 	remaining := publishBatches
 
+	if run.queue != nil {
+		sink := matchSink{queue: run.queue, slot: &run.slots[index]}
+
+		if state.paired != nil {
+			state.paired.sink = sink
+		} else {
+			state.walk.sink = sink
+		}
+	}
+
 	for !run.stopped.Load() && run.ctx.Err() == nil {
 		err = state.searchBatch(run.matcher, save, &stats)
 		if err != nil {
@@ -161,36 +176,20 @@ func (run *parallelRun) work(index int) {
 // RunWithOptions preserves the direct single-worker path when placement is not
 // requested. It does not change GOMAXPROCS; the application owns that decision.
 func RunWithOptions(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, options Options) (Stats, error) {
-	if options.Workers < 1 {
-		return Stats{}, errors.New("search requires at least one worker")
-	}
-
 	if matcher == nil || save == nil {
 		return Stats{}, errors.New("search requires a matcher and a save function")
 	}
 
-	if len(options.CPUs) != 0 {
-		if len(options.CPUs) != options.Workers {
-			return Stats{}, errors.New("placement requires one CPU per worker")
-		}
-
-		seen := make(map[cpu.CPU]bool, options.Workers)
-
-		for _, processor := range options.CPUs {
-			identity := cpu.CPU{Group: processor.Group, Number: processor.Number}
-			if seen[identity] {
-				return Stats{}, errors.New("placement requires distinct logical CPUs")
-			}
-
-			seen[identity] = true
-		}
+	err := validateOptions(options)
+	if err != nil {
+		return Stats{}, err
 	}
 
 	if options.Workers == 1 && len(options.CPUs) == 0 {
 		return RunWithProgress(ctx, matcher, save, options.Progress)
 	}
 
-	err := ctx.Err()
+	err = ctx.Err()
 	if err != nil {
 		return Stats{}, err
 	}
@@ -201,6 +200,10 @@ func RunWithOptions(ctx context.Context, matcher *pattern.Matcher, save SaveFunc
 }
 
 func runParallel(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, options Options, hooks parallelHooks) (Stats, error) {
+	return runWorkers(ctx, matcher, save, options, hooks, nil)
+}
+
+func runWorkers(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, options Options, hooks parallelHooks, queue *saveQueue) (Stats, error) {
 	run := parallelRun{
 		ctx:     ctx,
 		matcher: matcher,
@@ -209,6 +212,7 @@ func runParallel(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, o
 		hooks:   hooks,
 		slots:   make([]counterSlot, options.Workers),
 		done:    make(chan struct{}, options.Workers),
+		queue:   queue,
 	}
 
 	var ticks <-chan time.Time
@@ -218,6 +222,10 @@ func runParallel(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, o
 		defer ticker.Stop()
 
 		ticks = ticker.C
+	}
+
+	if queue != nil {
+		go run.saveMatches()
 	}
 
 	for index := range options.Workers {
@@ -238,6 +246,11 @@ func runParallel(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, o
 		}
 	}
 
+	if queue != nil {
+		close(queue.matches)
+		<-queue.done
+	}
+
 	if run.err != nil {
 		return run.totals(), run.err
 	}
@@ -248,4 +261,31 @@ func runParallel(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, o
 func createSecureWorker(_ int, matcher *pattern.Matcher) (*worker, error) {
 	// Each generator obtains independent seeds directly from the OS CSPRNG.
 	return newWorker(rand.Reader, matcher)
+}
+
+func validateOptions(options Options) error {
+	if options.Workers < 1 {
+		return errors.New("search requires at least one worker")
+	}
+
+	if len(options.CPUs) == 0 {
+		return nil
+	}
+
+	if len(options.CPUs) != options.Workers {
+		return errors.New("placement requires one CPU per worker")
+	}
+
+	seen := make(map[cpu.CPU]bool, options.Workers)
+
+	for _, processor := range options.CPUs {
+		identity := cpu.CPU{Group: processor.Group, Number: processor.Number}
+		if seen[identity] {
+			return errors.New("placement requires distinct logical CPUs")
+		}
+
+		seen[identity] = true
+	}
+
+	return nil
 }

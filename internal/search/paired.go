@@ -43,6 +43,7 @@ type pairedGenerator struct {
 	random     io.Reader
 	position   int
 	cursor     int
+	sink       matchSink
 }
 
 var (
@@ -269,6 +270,10 @@ func (state *pairedGenerator) completeSign(index int) {
 }
 
 func (state *pairedGenerator) key(index int) onion.Key {
+	return state.snapshot(index).key()
+}
+
+func (state *pairedGenerator) snapshot(index int) candidate {
 	steps := state.steps[index/2]
 
 	if index&1 == 0 {
@@ -277,7 +282,7 @@ func (state *pairedGenerator) key(index int) onion.Key {
 		steps -= uint64(state.position)
 	}
 
-	return onion.Key{Public: state.publicKeys[index], Secret: offsetSecret(state.secrets[index/2], steps)}
+	return candidate{public: state.publicKeys[index], secret: state.secrets[index/2], steps: steps}
 }
 
 func (state *pairedGenerator) searchBatch(matcher *pattern.Matcher, save SaveFunc, stats *Stats) error {
@@ -306,12 +311,10 @@ func (state *pairedGenerator) searchBatch(matcher *pattern.Matcher, save SaveFun
 			continue
 		}
 
-		err := save(state.key(index))
+		err := state.sink.submit(state.snapshot(index), save, stats)
 		if err != nil {
-			return fmt.Errorf("save matching key: %w", err)
+			return err
 		}
-
-		stats.Saved++
 
 		// The pending minus candidate shares this seed. Skip it before reseeding
 		// and replenish from the next batch; it is never counted as checked.

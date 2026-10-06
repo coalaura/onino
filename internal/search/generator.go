@@ -30,6 +30,7 @@ type generator struct {
 	seedBuffer [32]byte
 	round      uint64
 	random     io.Reader
+	sink       matchSink
 }
 
 func (generator *generator) reseed(index int) error {
@@ -106,10 +107,14 @@ func (generator *generator) matches(index int, matcher, filter *pattern.Matcher)
 }
 
 func (generator *generator) key(index int) onion.Key {
-	steps := generator.round - generator.started[index]
-	return onion.Key{
-		Public: generator.publicKeys[index],
-		Secret: offsetSecret(generator.secrets[index], steps),
+	return generator.snapshot(index).key()
+}
+
+func (generator *generator) snapshot(index int) candidate {
+	return candidate{
+		public: generator.publicKeys[index],
+		secret: generator.secrets[index],
+		steps:  generator.round - generator.started[index],
 	}
 }
 

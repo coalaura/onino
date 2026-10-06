@@ -1,6 +1,8 @@
 param(
 	[string]$Baseline = "measurements/anchored-baseline-measure.exe",
 	[string]$Candidate = "measurements/anchored-scalar-measure.exe",
+	[string]$BaselineMode = "parallel",
+	[string]$CandidateMode = "parallel",
 	[string]$Name = "anchored-workers",
 	[string]$Workloads = "donate,privacy,rare,three6,three7,512",
 	[string]$Workers = "1,16,32",
@@ -14,7 +16,6 @@ $env:GODEBUG = "cpu.avx512f=off,cpu.avx512bw=off,cpu.avx512vl=off"
 $env:ONINO_MEASURE = $Workloads
 $env:ONINO_WORKERS = $Workers
 $env:ONINO_PLACEMENTS = "spread"
-$env:ONINO_MODES = "parallel"
 $env:ONINO_SECONDS = "$Seconds"
 $env:ONINO_REPEATS = "1"
 
@@ -25,6 +26,7 @@ for ($pair = 0; $pair -lt $Pairs; $pair++) {
 	}
 
 	foreach ($index in $order) {
+		$env:ONINO_MODES = @($BaselineMode, $CandidateMode)[$index]
 		$binary = @($Baseline, $Candidate)[$index]
 		$side = @("before", "after")[$index]
 		& $binary '-test.run=^TestMeasureMulticore$' '-test.v' '-test.timeout=30m' | Tee-Object -FilePath "measurements/$Name-$pair-$side.txt"

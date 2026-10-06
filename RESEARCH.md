@@ -851,3 +851,80 @@ All eight runs exited successfully after graceful cancellation. Normal productio
 | 3 | scalar | 4077923840 | 12 | 10.024 s | 406796002 |
 
 Median throughput is **373.524 → 405.968 Mkeys/s (+8.69%)**. Full ranges are 371.920-374.442 and 404.365-407.739 Mkeys/s respectively. This independent persisted confirmation supports retaining the scalar specialization; it is not substituted for the controlled deterministic benchmarks.
+
+## Bounded asynchronous saving
+
+The CLI now uses `search.RunQueued`: one saver goroutine consumes a 64-entry channel of owned candidate snapshots. A snapshot contains the exact public key, base expanded secret, scalar offset and discovery timestamp (128 bytes on the measurement target; 8 KiB of buffered payload). A worker performs the necessary sign/checksum-aware match, copies the snapshot, publishes its checked counter and enqueues it. After acceptance it discards any pending sibling, reseeds and continues. The saver applies the scalar offset, then invokes the existing persistence callback, which independently verifies the key pair, derives the hostname, writes and flushes all Tor files and publishes the directory. Neither worker state nor mutable buffers are shared through the queue. There is no goroutine or heap allocation per hit.
+
+The capacity is a fixed bounded burst buffer, not an assertion that disk throughput has increased. When it fills, producers wait. `GOMAXPROCS` remains the requested search-worker count and the saver is unpinned. With one worker there is consequently no extra Go execution slot; blocking I/O can overlap, but finalization and verification still share the existing CPU budget. The original `Run`, `RunWithProgress` and `RunWithOptions` synchronous contracts remain available and provide the comparison path.
+
+Cancellation finishes in-flight 512-candidate batches, closes the queue after all producers exit, drains accepted matches and waits for the saver. Worker failures also drain accepted matches. A save failure stops further callbacks and wakes blocked producers; the remaining queue is not persisted, the actual save error is returned and only completed successful saves contribute to `Saved`. Progress and save callbacks retain their shared serialization. Checked counts are published before handoff, so a report cannot count a successful save before its candidate check. Displayed match times use discovery rather than persistence time; cross-worker out-of-order discoveries cannot produce negative inter-match intervals.
+
+### Verification
+
+Deterministic `testing/synctest` coverage blocks the first save, proves that the worker fills the buffer and then blocks, advances the clock, cancels and verifies a complete drain with original timestamps. Both generator engines are exercised, including independent signatures and unique nonce prefixes after reseeding. Four concurrent paired workers drain 2,048 independently seeded keys. Further tests cover full-queue save failure, save-error precedence over cancellation, reseed failure with an accepted match, simultaneous reseed/save errors, plus/minus scalar snapshots surviving a table transition and reset, pre-cancellation and zero-allocation hit paths. Existing synchronous behavior tests remain intact.
+
+PACE and stock-Go native/purego full suites passed with `-vet=off -pgo=off`. Linux native/purego search race suites passed under WSL, including the new concurrent drain test. Custom vet passed for Windows native/purego/measure tests and Linux/Darwin tests. No new dependencies were needed.
+
+### Measurement protocol and commands
+
+The baseline is `c0ebb42`, with its pre-edit search test binary preserved as `measurements/queued-before.exe`. Measurements use the same Windows/9950X3D host, PACE Go 1.27.1, `GOAMD64=v1`, `-pgo=off` and AVX2 maximum as above. The initial pinned batch-loop check uses four alternating one-second pairs after warm-up. The production-worker experiment compares synchronous and queued modes in the same binary, with a 200 ms warm-up per worker, spread placement, identical worker counts and four alternating pairs. Rare/three-prefix controls use deterministic per-worker streams and a cheap sink; `persist_prefix` uses `abcd.`, secure entropy and the real `onion.Store` in a temporary output directory. Its measured duration includes cancellation and the entire final save drain. These are production search/store measurements, not CLI or time-to-first-match measurements.
+
+```powershell
+$env:GOAMD64 = "v1"
+$env:GODEBUG = "cpu.avx512f=off,cpu.avx512bw=off,cpu.avx512vl=off"
+# Preserve this binary before editing the baseline.
+pace test -vet=off -pgo=off -c -o measurements/queued-before.exe ./internal/search
+# Build after implementing the queue.
+pace test -vet=off -pgo=off -c -o measurements/queued-after.exe ./internal/search
+pace test -vet=off -pgo=off -tags measure -c -o measurements/queued-measure.exe ./internal/search
+./internal/search/testdata/anchored/measure-single.ps1 -Baseline measurements/queued-before.exe -Candidate measurements/queued-after.exe -Name queued-miss -Bench '^BenchmarkAnchoredSearch/(donate|privacy|rare|three6)$' -Time 1s -Count 4
+./internal/search/testdata/anchored/measure-workers.ps1 -Baseline measurements/queued-measure.exe -Candidate measurements/queued-measure.exe -CandidateMode queued -Name queued-workers -Workloads "rare,three6,persist_prefix" -Workers "1,32" -Seconds 3 -Pairs 4
+./internal/search/testdata/anchored/measure-workers.ps1 -Baseline measurements/queued-measure.exe -Candidate measurements/queued-measure.exe -CandidateMode queued -Name queued-single-persistence -Workloads persist_prefix -Workers 1 -Seconds 10 -Pairs 4
+pace test -vet=off -pgo=off ./...
+pace test -vet=off -pgo=off -tags purego ./...
+go test -vet=off -pgo=off ./...
+go test -vet=off -pgo=off -tags purego ./...
+vet --tests --os windows ./...
+vet --tests --tags purego --os windows ./...
+vet --tests --tags measure --os windows ./...
+vet --tests --os linux ./...
+vet --tests --os darwin ./...
+wsl.exe --cd /mnt/c/Users/Laura/onino --exec bash -lc 'go test -vet=off -race -pgo=off ./internal/search && go test -vet=off -race -pgo=off -tags purego ./internal/search'
+```
+
+The worker harness now accepts optional baseline/candidate modes, each defaulting to `parallel`. Original logs are `measurements/queued-miss-{before,after}.txt`, `queued-workers-<pair>-{before,after}.txt` and `queued-single-persistence-<pair>-{before,after}.txt`. Worker logs retain exact checked/saved counts, elapsed seconds, allocations and placements as `MEASURE` JSON. Startup queue allocation is outside the worker measurement gate; reported steady-interval allocations include bounded coordinator/shutdown work and, for persisted workloads, normal filesystem allocation. Separate allocation assertions cover the queue hit path itself.
+
+### Pinned batch-loop regression check
+
+Raw samples are ns/key; all 32 samples reported 0 B/op and 0 allocs/op. The three-prefix runs have visible timing outliers, so the small median differences are not optimization claims.
+
+| Workload | Baseline samples | Queue-capable samples | Baseline median | Queue-capable median |
+| --- | --- | --- | ---: | ---: |
+| donate | 39.20, 39.28, 39.30, 39.21 | 39.21, 39.24, 39.18, 39.18 | 39.245 | 39.195 |
+| privacy | 39.21, 39.24, 39.20, 39.23 | 39.19, 39.23, 39.33, 39.18 | 39.220 | 39.210 |
+| rare | 39.26, 39.31, 39.23, 39.41 | 39.78, 39.19, 39.20, 39.22 | 39.285 | 39.210 |
+| three6 | 42.38, 40.43, 40.04, 40.04 | 42.05, 40.15, 40.19, 40.34 | 40.235 | 40.265 |
+
+### Production worker comparison
+
+All rates below are Mkeys/s; raw samples are in pair order. Summary columns show median [minimum-maximum].
+
+| Workload/workers | Synchronous samples | Queued samples | Synchronous summary | Queued summary | Median change |
+| --- | --- | --- | --- | --- | ---: |
+| rare/1 | 23.048253, 23.019134, 22.972392, 23.020503 | 22.981906, 22.954841, 22.915498, 23.089049 | 23.020 [22.972-23.048] | 22.968 [22.915-23.089] | -0.22% |
+| rare/32 | 413.825386, 416.739456, 417.124131, 414.176600 | 415.999421, 410.358124, 414.655795, 417.018081 | 415.458 [413.825-417.124] | 415.328 [410.358-417.018] | -0.03% |
+| three6/1 | 20.234445, 21.778939, 22.588896, 21.751446 | 21.826084, 21.748225, 21.038165, 22.562672 | 21.765 [20.234-22.589] | 21.787 [21.038-22.563] | 0.10% |
+| three6/32 | 401.551161, 406.886114, 407.472527, 407.131982 | 407.927763, 407.390365, 392.460005, 403.717376 | 407.009 [401.551-407.473] | 405.554 [392.460-407.928] | -0.36% |
+| persist_prefix/1 | 21.088199, 20.182748, 21.519335, 20.888588 | 20.584546, 21.066978, 20.258019, 20.413938 | 20.988 [20.183-21.519] | 20.499 [20.258-21.067] | -2.33% |
+| persist_prefix/32 | 278.849653, 279.306319, 282.547248, 275.488396 | 309.082219, 307.453056, 302.427964, 307.552064 | 279.078 [275.488-282.547] | 307.503 [302.428-309.082] | 10.19% |
+
+The initial single-worker persistence result was ambiguous and was repeated with ten-second intervals, again four alternating pairs:
+
+| Workload/workers | Synchronous samples | Queued samples | Synchronous summary | Queued summary | Median change |
+| --- | --- | --- | --- | --- | ---: |
+| persist_prefix/1 | 21.050249, 21.322298, 20.950009, 21.182460 | 21.184721, 21.215950, 20.419037, 21.152606 | 21.116 [20.950-21.322] | 21.169 [20.419-21.216] | 0.25% |
+
+For the 32-worker persisted samples, exact successful saves were synchronous `[842, 794, 788, 861]` and queued `[941, 920, 977, 929]`. Full measured durations were respectively `[3.0380614, 3.0416823, 3.0201209, 3.0215071]` and `[3.1822291, 3.1816741, 3.1909718, 3.1804251]` seconds. The queue's roughly 0.18-second final drain is included in its reported throughput. In the longer single-worker confirmation, successful saves were `[186, 193, 204, 218]` and `[199, 182, 199, 194]`; counts vary because persisted workloads use independent secure random streams.
+
+Retain the bounded queue for independent worker progress and the clear **+10.19%** persisted 32-worker improvement. Single-worker persistence and rare-match controls are effectively flat in these measurements; there is no claim of a universal speedup or greater sustained disk capacity. The queue overlaps work and absorbs bursts while preserving bounded memory and completed-save accounting.

@@ -125,20 +125,21 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 
 	options := search.Options{Workers: workers, CPUs: processors, Progress: progress}
 
-	stats, err := search.RunWithOptions(ctx, matcher, func(key onion.Key) error {
-		found := time.Now()
-
+	stats, err := search.RunQueued(ctx, matcher, func(key onion.Key, found time.Time) error {
 		saveError := store.Save(key)
 		if saveError != nil {
 			return saveError
 		}
 
-		matchSeconds := found.Sub(lastMatch).Seconds()
+		// Queue order across workers need not be discovery-time order.
+		matchSeconds := max(0, found.Sub(lastMatch).Seconds())
 		totalSeconds := found.Sub(started).Seconds()
 
 		fmt.Fprintf(command.Writer, "%s in %.2fs (%.2fs total)\n", key.Hostname(), matchSeconds, totalSeconds)
 
-		lastMatch = found
+		if found.After(lastMatch) {
+			lastMatch = found
+		}
 
 		return nil
 	}, options)
