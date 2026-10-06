@@ -1,0 +1,23 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "field.glsl"
+layout(local_size_x = 64) in;
+struct Command { Field first; Field second; Field unused; uint expected; uint generation; uint operation; };
+layout(std430, binding = 2) readonly buffer Commands { Command commands[]; };
+layout(std430, binding = 3) buffer Results { uint count; uint checked; uint pending; uint reserved; uint words[]; };
+void main() {
+	if (gl_LocalInvocationID.x != 0) { return; }
+	uint index = gl_WorkGroupID.x;
+	Command command = commands[index];
+	Field result;
+	switch (command.operation) {
+		case 0: result = add(command.first, command.second); break;
+		case 1: result = sub(command.first, command.second); break;
+		case 2: result = mul(command.first, command.second); break;
+		case 3: result = square(command.first); break;
+		default: result = inverse(command.first); break;
+	}
+	result = canonical(result);
+	for (uint limb = 0; limb < 10; limb++) { words[index * 12 + limb] = result.limb[limb]; }
+	if (index == 0) { count = gl_NumWorkGroups.x * 2; }
+}

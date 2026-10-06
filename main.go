@@ -35,7 +35,7 @@ func newCommand() *cli.Command {
 		Usage:       "Continuously search for vanity v3 onion addresses",
 		ArgsUsage:   "pattern [pattern ...]",
 		Description: "Patterns match the first 52 visible lowercase base32 characters of the onion hostname.\nSuffixes end at character 52, before the final four checksum/version characters.\nForms: prefix.  .suffix  prefix.suffix  .interior.  anywhere",
-		Flags: []cli.Flag{
+		Flags: backendFlags([]cli.Flag{
 			&cli.StringFlag{
 				Name:  "simd",
 				Value: "auto",
@@ -52,7 +52,7 @@ func newCommand() *cli.Command {
 				Value:   "matches",
 				Usage:   "Directory for matching Tor service keys",
 			},
-		},
+		}),
 		Action: runSearch,
 	}
 }
@@ -60,6 +60,11 @@ func newCommand() *cli.Command {
 func runSearch(ctx context.Context, command *cli.Command) error {
 	if command.NArg() == 0 {
 		return errors.New("at least one pattern is required")
+	}
+
+	err := validateBackend(command)
+	if err != nil {
+		return err
 	}
 
 	mode, err := simd.Parse(command.String("simd"))
@@ -84,18 +89,18 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	workers, err := cpu.Resolve(command.String("cpu"), len(topology.CPUs))
+	workers, err := resolveWorkers(command, len(topology.CPUs))
 	if err != nil {
 		return err
 	}
 
-	runtime.GOMAXPROCS(workers)
+	runtime.GOMAXPROCS(backendParallelism(command, workers))
 
 	var processors []cpu.CPU
 
 	placement := "OS placement"
 
-	if workers > 1 {
+	if workers > 1 || pinSingleWorker(command, workers) {
 		if topology.Known {
 			processors, err = cpu.Select(topology, workers, true)
 			if err != nil {
@@ -136,7 +141,7 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 
 	options := search.Options{Workers: workers, CPUs: processors, Progress: progress, SIMD: mode}
 
-	stats, err := search.RunQueued(ctx, matcher, func(key onion.Key, found time.Time) error {
+	stats, err := runBackend(ctx, command, matcher, func(key onion.Key, found time.Time) error {
 		saveError := store.Save(key)
 		if saveError != nil {
 			return saveError

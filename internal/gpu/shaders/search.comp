@@ -1,0 +1,153 @@
+#version 460
+#extension GL_GOOGLE_include_directive : require
+#include "field.glsl"
+
+#ifndef ONINO_INITIAL_STEPS
+#define ONINO_INITIAL_STEPS 64u
+#endif
+
+layout(local_size_x = 64) in;
+struct Affine { Field x; Field y; Field xy; };
+// All storage layouts deliberately use uint words, avoiding host ABI padding.
+struct Stream { Affine center; uint generation; uint steps; uint cursor; uint status; uint hitSteps; uint kind; uint low; uint high; };
+struct Command { Affine center; uint expected; uint generation; uint action; };
+struct Probe { uint lowMask; uint highMask; uint lowValue; uint highValue; };
+struct Hit { uint stream; uint generation; uint steps; uint kind; uint low; uint high; };
+layout(std430, binding = 0) buffer Streams { Stream streams[]; };
+layout(std430, binding = 1) readonly buffer Tables { Affine offsets[65]; Probe probes[8]; uint probeCount; };
+layout(std430, binding = 2) buffer Commands { Command commands[]; };
+layout(std430, binding = 3) buffer Results { uint count; uint checked; uint pending; uint reserved; Hit hits[]; };
+layout(push_constant) uniform Parameters { uint rounds; uint capacity; uint collectOnly; uint unused; } parameters;
+
+shared Field products[128];
+shared uint winner;
+shared uint running;
+#ifdef ONINO_DIAGNOSTIC
+shared Field matchedY;
+shared uint matchedSign;
+#endif
+
+bool matches(Field ordinate) {
+	uint64_t word = firstWord(ordinate);
+	for (uint index = 0; index < probeCount; index++) {
+		Probe probe = probes[index];
+		if ((uint(word) & probe.lowMask) == probe.lowValue && (uint(word >> 32) & probe.highMask) == probe.highValue) { return true; }
+	}
+	return false;
+}
+void publish(uint streamIndex) {
+	if (streams[streamIndex].status != 1) { return; }
+	uint destination = atomicAdd(count, 1);
+	if (destination < parameters.capacity) {
+		Stream stream = streams[streamIndex];
+		hits[destination] = Hit(streamIndex, stream.generation, stream.hitSteps, stream.kind, stream.low, stream.high);
+		streams[streamIndex].status = 2;
+	} else { atomicAdd(pending, 1); }
+}
+void main() {
+	uint streamIndex = gl_WorkGroupID.x;
+	uint lane = gl_LocalInvocationID.x;
+	if (lane == 0) {
+		Command command = commands[streamIndex];
+		if (command.action != 0 && command.expected == streams[streamIndex].generation) {
+			if (command.action == 2) {
+				streams[streamIndex].center = command.center;
+				streams[streamIndex].generation = command.generation;
+				streams[streamIndex].steps = ONINO_INITIAL_STEPS;
+				streams[streamIndex].cursor = 0;
+			}
+			streams[streamIndex].status = 0;
+		}
+		commands[streamIndex].action = 0;
+		running = uint(streams[streamIndex].status == 0 && parameters.collectOnly == 0);
+	}
+	memoryBarrierBuffer();
+	barrier();
+	for (uint round = 0; round < parameters.rounds && running != 0; round++) {
+		Stream stream = streams[streamIndex];
+		Affine offset = offsets[lane];
+		Field productX = mul(stream.center.x, offset.x);
+		Field productY = mul(stream.center.y, offset.y);
+		Field mixed = mul(stream.center.xy, offset.xy);
+		products[64 + lane] = sub(small(1), square(mixed));
+		if (lane == 0) { winner = 128; }
+		barrier();
+		for (uint size = 32; size > 0; size >>= 1) {
+			if (lane < size) { products[size + lane] = mul(products[2 * (size + lane)], products[2 * (size + lane) + 1]); }
+			barrier();
+		}
+		if (lane == 0) { products[1] = inverse(products[1]); }
+		barrier();
+		for (uint size = 1; size < 64; size <<= 1) {
+			if (lane < size) {
+				uint node = size + lane;
+				Field left = products[2 * node];
+				Field right = products[2 * node + 1];
+				products[2 * node] = mul(products[node], right);
+				products[2 * node + 1] = mul(products[node], left);
+			}
+			barrier();
+		}
+		Field reciprocal = products[64 + lane];
+		Field factor = mul(mixed, reciprocal);
+		Field plus = canonical(mul(add(productY, productX), add(reciprocal, factor)));
+		Field minus = canonical(mul(sub(productY, productX), sub(reciprocal, factor)));
+		uint plusIndex = 2 * lane;
+		uint minusIndex = plusIndex + 1;
+		if (plusIndex >= stream.cursor && matches(plus)) { atomicMin(winner, plusIndex); }
+		if (minusIndex >= stream.cursor && matches(minus)) { atomicMin(winner, minusIndex); }
+		barrier();
+		if (winner / 2 == lane) {
+#ifdef ONINO_DIAGNOSTIC
+			matchedY = (winner & 1) == 0 ? plus : minus;
+			Field crossFirst = mul(stream.center.x, offset.y);
+			Field crossSecond = mul(stream.center.y, offset.x);
+			Field abscissa = (winner & 1) == 0 ? mul(add(crossFirst, crossSecond), sub(reciprocal, factor)) : mul(sub(crossFirst, crossSecond), add(reciprocal, factor));
+			matchedSign = canonical(abscissa).limb[0] & 1;
+#endif
+			uint64_t word = firstWord((winner & 1) == 0 ? plus : minus);
+			streams[streamIndex].low = uint(word);
+			streams[streamIndex].high = uint(word >> 32);
+			streams[streamIndex].hitSteps = (winner & 1) == 0 ? stream.steps + lane + 1 : stream.steps - lane - 1;
+			streams[streamIndex].kind = 0;
+		}
+		barrier();
+		if (lane == 0) {
+			atomicAdd(checked, min(winner + 1, 128u) - stream.cursor);
+			if (winner < 128) {
+				streams[streamIndex].cursor = winner + 1;
+				streams[streamIndex].status = 1;
+				running = 0;
+			} else if (stream.steps > 0xffffffffu - 193u) {
+				streams[streamIndex].kind = 1;
+				streams[streamIndex].status = 1;
+				running = 0;
+			} else {
+				Affine jump = offsets[64];
+				Field mixedJump = mul(stream.center.xy, jump.xy);
+				Field reciprocalJump = inverse(sub(small(1), square(mixedJump)));
+				Field factorJump = mul(mixedJump, reciprocalJump);
+				Field numeratorX = add(mul(stream.center.x, jump.y), mul(stream.center.y, jump.x));
+				Field numeratorY = add(mul(stream.center.y, jump.y), mul(stream.center.x, jump.x));
+				Affine next;
+				next.x = mul(numeratorX, sub(reciprocalJump, factorJump));
+				next.y = mul(numeratorY, add(reciprocalJump, factorJump));
+				next.xy = mul(next.x, next.y);
+				streams[streamIndex].center = next;
+				streams[streamIndex].steps = stream.steps + 129;
+				streams[streamIndex].cursor = 0;
+			}
+		}
+		memoryBarrierBuffer();
+		barrier();
+	}
+	if (lane == 0) { publish(streamIndex); }
+#ifdef ONINO_DIAGNOSTIC
+	// Test-only full encoding of the selected candidate, using two ordinary record slots.
+	if (lane == 0) {
+		hits[streamIndex * 2] = Hit(streams[streamIndex].hitSteps, streams[streamIndex].generation, matchedY.limb[0], matchedY.limb[1], matchedY.limb[2], matchedY.limb[3]);
+		hits[streamIndex * 2 + 1] = Hit(matchedY.limb[4], matchedY.limb[5], matchedY.limb[6], matchedY.limb[7], matchedY.limb[8], matchedY.limb[9] | (matchedSign << 25));
+		atomicAdd(count, 1);
+	}
+#endif
+}
