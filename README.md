@@ -1,7 +1,7 @@
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/banner.svg">
 	<source media="(prefers-color-scheme: light)" srcset=".github/banner-light.svg">
-	<img alt="onino — CPU-only vanity .onion search. A racing onion wordmark; oni[on ⇄ no] flips onion’s final two letters." src=".github/banner-light.svg">
+	<img alt="onino - CPU-only vanity .onion search. A racing onion wordmark; oni[on ⇄ no] flips onion's final two letters." src=".github/banner-light.svg">
 </picture>
 
 CPU-only vanity v3 `.onion` address search across the first **52 visible hostname characters**. onino matches public keys against compiled patterns and keeps searching after saving matches. It defaults to one worker; use `--cpu` for multicore search.
@@ -21,6 +21,8 @@ On Windows, build with `pace build -o onino.exe .` and invoke `./onino.exe`. Sto
 Use `--help` for usage and `--output` / `-o` to select the destination directory; it defaults to `matches`.
 
 `--cpu` accepts a positive integer or `all`, bounded by the logical CPUs available to the process. Windows/Linux affinity restrictions are respected. Multiple workers use discovered physical cores before SMT siblings and spread across last-level caches; unsupported topology uses OS placement and says so at startup. The flag selects search workers, not total runtime threads.
+
+`--simd=auto` (the default) selects optional AVX-512 acceleration at startup when the CPU and operating system support the required instructions and register state. Use `--simd=avx2` to skip onino's AVX-512 detection and disable all its AVX-512 paths. Both modes use the same binary and compilation baseline; older CPUs retain their existing fallbacks.
 
 Patterns are ORed together. Supported forms are `prefix.`, `.suffix`, `prefix.suffix`, `.interior.` and `anywhere`; see [the matcher documentation](internal/pattern/README.md) for precise rules and validation.
 
@@ -55,7 +57,7 @@ Very frequent short patterns use an independently seeded projective `8B` walk in
 
 Small pattern sets use specialized scalar and AVX2 filters. At 32 eligible unanchored literals, a strided triplet dictionary shares filtering work across the set. Large anchored sets use fixed-position indexes. All filters verify complete constraints before accepting a match.
 
-The field backend uses four 64-bit limbs with fused BMI2/ADX assembly where available. Arithmetic and AVX2 matching are detected independently; AVX2 dispatch also checks operating-system vector-state support. AVX2 is the SIMD ceiling and `-tags purego` disables both assembly paths. PACE supplies register-ABI calls and targeted inlining; PGO is not required.
+Arithmetic, matching and checksum acceleration are selected independently. Existing BMI2/ADX and AVX2 paths remain available; `-tags purego` disables native assembly, including AVX-512. PACE supplies register-ABI calls and targeted inlining; stock Go remains supported and PGO is not required.
 
 Steady-state search and queue handoff perform no heap allocations; filesystem persistence allocates separately. Each worker owns its generator, secure seeds, pending candidates, scratch and counters. Shared search tables are immutable and queued snapshots contain no references to worker state. The CLI uses `search.RunQueued`, with one saver even for a single search worker and sets `GOMAXPROCS` to the worker count once. `search.Run`, `RunWithProgress` and `RunWithOptions` retain their synchronous save contracts. Saved counters advance only after successful persistence; a save error stops workers and further saves, while a worker error still drains already accepted matches. See [research and implementation notes](RESEARCH.md) for formulas, invariants and measured tradeoffs.
 

@@ -209,7 +209,7 @@ func BenchmarkFullSearch(b *testing.B) {
 				b.Fatal(err)
 			}
 
-			state, err := newWorker(sha3.NewSHAKE256(), matcher)
+			state, err := benchmarkSIMDWorker(sha3.NewSHAKE256(), matcher)
 			if err != nil {
 				b.Fatal(err)
 			}

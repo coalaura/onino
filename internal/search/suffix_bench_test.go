@@ -3,6 +3,7 @@ package search
 import (
 	"crypto/rand"
 	"crypto/sha3"
+	"io"
 	"testing"
 
 	"github.com/coalaura/onino/internal/pattern"
@@ -28,17 +29,19 @@ func BenchmarkSuffixCosts(b *testing.B) {
 					b.Fatal(err)
 				}
 
-				state, err := newWorker(sha3.NewSHAKE256(), matcher)
+				var random io.Reader = sha3.NewSHAKE256()
+
+				if mode == "reseed_random" {
+					random = rand.Reader
+				}
+
+				state, err := benchmarkSIMDWorker(random, matcher)
 				if err != nil {
 					b.Fatal(err)
 				}
 
-				if mode == "reseed_random" {
-					if state.paired != nil {
-						state.paired.random = rand.Reader
-					} else {
-						state.walk.random = rand.Reader
-					}
+				if mode == "matching_only" && state.accelerated != nil {
+					b.Skip("legacy diagnostic; use SIMDSearch for complete accelerated matching")
 				}
 
 				var stats Stats

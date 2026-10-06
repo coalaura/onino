@@ -7,9 +7,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coalaura/onino/internal/cpu"
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 const saveQueueCapacity = 64
@@ -121,7 +121,8 @@ func RunQueued(ctx context.Context, matcher *pattern.Matcher, save SaveMatchFunc
 		return Stats{}, err
 	}
 
-	hooks := parallelHooks{create: createSecureWorker, pin: cpu.Pin, interval: progressInterval}
+	features := simd.Detect(options.SIMD)
+	hooks := secureHooks(features)
 
 	return runQueued(ctx, matcher, save, options, hooks)
 }

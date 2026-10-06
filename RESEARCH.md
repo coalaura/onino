@@ -24,7 +24,7 @@ x(P+Q) = (xP*yQ + yP*xQ)*minusInverse
 x(P-Q) = (xP*yQ - yP*xQ)*plusInverse
 ```
 
-The 256 centers share one inversion of the product of `1-c²`. Both reconstructed reciprocals survive matching, so a filter survivor needs three multiplications to recover X and its exact sign, with no additional inversion. The two Y values are serialized canonically before filtering. The sign filter ignores only byte 31's high bit, which affects base32 character 50; the complete matcher runs after sign recovery.
+The 256 centers share one inversion of the product of `1-c²`. Both reconstructed reciprocals survive matching, so a filter survivor needs three multiplications to recover X and its exact sign, with no additional inversion. The two Y values are reduced canonically before filtering: the scalar path serializes them, while the optional vector prefix path filters canonical words and serializes survivors. The sign filter ignores only byte 31's high bit, which affects base32 character 50; the complete matcher runs after sign recovery.
 
 These denominators are nonzero for valid affine points over this field: `a` is a square and `d` is a nonsquare, the complete twisted-Edwards addition case. Tests include identity order-two/order-four points, positive/negative offsets and independently multiplied search keys. The field-character assumptions are also checked with `math/big`.
 
@@ -38,7 +38,7 @@ Each center starts from an independent expanded secret at offset 64, so subtract
 
 A saved key is a value snapshot. A hit on the plus side invalidates its pending minus relative before the center is reseeded; a minus-side hit has no remaining sibling. Later candidates from that seed are never exported. Skipped relatives do not increment `Checked` and generation replenishes them until the batch contains 512 actual checks. Other centers' pending candidates remain valid. Cancellation is observed between these bounded batches, retaining the existing synchronous save semantics.
 
-The paired state occupies approximately 114 KiB on amd64, including secrets, scratch and public keys, with about 6 KiB of shared offset data. Only the selected engine is initialized. Matching data is separate and immutable.
+The four-limb paired state occupies approximately 114 KiB on amd64, including secrets, scratch and public keys, with about 6 KiB of shared offset data. The optional five-limb vector state is separate; only the selected engine is allocated and initialized. Matching data is separate and immutable.
 
 ### Native implementation
 
@@ -46,13 +46,151 @@ The portable Go engine was validated and benchmarked before assembly was added. 
 
 The amd64 leaves reuse the four-limb BMI2/ADX multiply core. PACE's natural argument registers avoid adapters; the routines are zero-frame, NOSPLIT leaves without calls. X registers preserve pointers across the multiplication core; R14 and X15 are untouched. The emitted assembler listings were checked, including the absence of AVX instructions in these arithmetic leaves. Constant memory displacements and expired prefix-product scratch avoid unnecessary address updates and copies.
 
-BMI2/ADX arithmetic dispatch is independent of AVX2 matcher dispatch. AVX2 is the SIMD ceiling and requires CPU, OSXSAVE and XGETBV support. `purego` selects real portable arithmetic and matching, not an assembly-backed simulation.
+BMI2/ADX arithmetic dispatch is independent of AVX2 matcher dispatch. The original SIMD ceiling was AVX2, requiring CPU, OSXSAVE and XGETBV support. The optional AVX-512 extension below preserves those implementations and the compilation baseline. `purego` selects real portable arithmetic and matching, not an assembly-backed simulation.
+
+## Optional AVX-512 acceleration
+
+### Scope, selection and measurement
+
+The motivation is to amortize paired arithmetic across independent centers without changing the search's scalar sequence or its immediate hit handling. This pass evaluated eight-lane IFMA, inversion/fusion, canonical prefix filtering, four-lane IFMA, dictionary/anywhere filtering and single-message SHA3 in that order. PACE Go 1.27.1 is the performance target; stock Go 1.27.1 is a compatibility target. The baseline was preserved from `7bca9a8` before implementation, including separate CLI and search-test executables.
+
+One `GOAMD64=v1` binary contains the existing CPU engines and the optional implementations. `--simd=auto` selects at initialization; `--simd=avx2` bypasses the new feature query entirely, including IFMA with 256-bit operands. There is no AVX-512 package-initialization probe. Detection first checks CPUID availability and XSAVE, OSXSAVE and AVX, then reads XCR0; bits 1, 2, 5, 6 and 7 must all be enabled (`XCR0 & 0xe6 == 0xe6`). Individual kernels additionally require these subsets:
+
+| Implementation | Instruction subsets after the common OS-state check | Status |
+| --- | --- | --- |
+| Eight-lane arithmetic and canonical prefix filter | AVX-512F + IFMA | Retained |
+| Four-lane YMM arithmetic | AVX-512F + IFMA + VL | Reproduction fixture only |
+| Gather/window extraction and membership experiment | AVX-512F + BW | Reproduction fixture only |
+| Vector rank population counts | Above + VPOPCNTDQ | Reproduction fixture only |
+| Immediate checksum | AVX-512F, independently of IFMA | Retained |
+
+Worker selection allocates only the chosen generator. Dispatch is outside candidate loops, at batch entry. Ordinary `Matcher.Match` and the original per-candidate loops are unchanged; checksum-capable workers use dedicated loops so adding checksum selection does not enlarge the original inlined matcher. Unsupported prefix plans keep ordinary matching. The immutable shared offsets remain scalar and are broadcast once per preparation pass. Portable builds contain no native AVX-512 code.
+
+All measurements in this section used Windows/amd64 on the Ryzen 9 9950X3D, exactly one search worker, logical CPU 2 (affinity mask 4, one member of a physical core), `GOMAXPROCS=1`, `-cpu=1`, `-parallel=1` and PGO disabled. Baseline/candidate samples alternated order; benchmarks, builds, tests and profiles ran sequentially. Seven samples were usual; regression confirmations used ten. The final main complete-search comparison contains six complete pairs; the other final comparisons contain seven. Generation and ordinary complete-search samples checked 30,000 batches of 512 candidates per sample; suffix screens used 10,000, confirmations 100,000 and the three-prefix, anywhere and expensive all-hit fixtures used 1,000. Initialization was outside timing. Deterministic SHAKE entropy and a no-op save callback keep candidate streams comparable; complete searches include matching, sign recovery, scalar adjustment, hit snapshots, transitions, discarded siblings and reseeding, but not filesystem persistence or queue/coordinator throughput. The machine remained in use, so pinning did not eliminate interference.
+
+Tables report median `[minimum, maximum]`, with negative baseline-relative changes meaning less time. Primitive, complete-generation and complete-search results are separate. All displayed steady-state cases measured **0 B/op and 0 allocs/op**. Raw samples, profiles and rejected experimental implementations are local research artifacts, excluded from the source changes.
+
+For reproduction, build baseline and candidate search-test executables with `GOMAXPROCS=1 GOAMD64=v1 pace test -vet=off -p=1 -c -pgo=off ./internal/search`. Pin the parent process to affinity mask 4 before launching either executable. Run `-test.run=^$ -test.bench=^BenchmarkFullSearch$ -test.benchmem -test.benchtime=30000x -test.count=1 -test.cpu=1 -test.parallel=1`, alternating baseline and candidate after a 1,000-batch warm-up. Candidate test builds accept `ONINO_BENCH_BACKEND=auto|avx2|scalar|keccak`; these controls never bypass capability checks. `BenchmarkSuffixCosts`, `BenchmarkSIMDWorkload`, `BenchmarkSIMDGeneration`, `BenchmarkIFMAPrimitive` and `BenchmarkSIMDChecksum` cover the other retained fixtures. Run profiles separately from timing samples and retain the same toolchain, affinity, candidate counts and entropy fixtures.
+
+### Eight-way arithmetic and hybrid inversion
+
+Each field element is five radix-`B = 2^51` limbs in structure-of-arrays layout, eight centers per ZMM vector. The 256 centers form 32 groups; their coordinates, cached products and reciprocal scratch remain vectorized across operations and batches. The paired formulas and deferred three-multiply sign recovery are unchanged. Dedicated squaring uses 15 product terms instead of 25.
+
+The arithmetic contract permits noncanonical values below `2^255`, but **every stored limb must be in `[0,B)`**; there is no externally supported lazy limb above that limit. Each ordinary IFMA multiplicand is below `2^51`; squaring doubles a cross-term operand to below `2^52`. Thus no significant multiplicand bit is discarded by IFMA's 52-bit input truncation. Reduction weights are applied to accumulators, not by multiplying an input limb by 19.
+
+For a coefficient with wraparound terms, the largest total product weight is `1 + 4*19 = 77`. Its low-52 accumulator is below `77*2^52` and its high accumulator below `77*2^50`, counting doubled square terms with their multiplicity. Joining high halves into radix-51 coefficients uses a factor of two; the top coefficient has weight five and folds into limb zero with another factor of 19. All joined coefficients remain below `2^60` with room for incoming carries, far below 64-bit overflow. After one carry round, limbs 1-4 are below B and limb zero is below `B + 19*512`. If the second round carries from limb zero, its remainder is below `19*512`; any full cascade can add at most another 19. Otherwise no later limb can carry. Two rounds therefore restore the normalized contract. Addition and subtraction use the same reduction, with subtraction biased by `2p`. All inputs are loaded before output stores, permitting either input to alias the result. Final canonical reduction is still required: normalized limbs alone do not distinguish `p` from zero.
+
+The forward pass builds eight independent prefix-product chains, one per lane, across all 32 groups. Their terminal products are converted to the existing four-limb representation, batch-inverted using exactly one scalar divsteps inversion and packed back for vector reverse passes. An eight-way exponentiation addition chain was independently checked, but one scalar inversion plus a small conversion/prefix cost was much faster. Fused forward/reverse leaves reduce call and scratch traffic. The following primitive comparisons use the same operation counts within one worker:
+
+| Primitive comparison | Reference ns/op | Candidate ns/op | Change |
+| --- | ---: | ---: | ---: |
+| Eight scalar multiplications → one eight-lane multiplication | 40.35 [40.27, 40.97] | 18.70 [18.59, 18.90] | -53.7% |
+| Eight scalar squares → one dedicated eight-lane square | 33.47 [33.31, 33.56] | 17.73 [17.68, 17.87] | -47.0% |
+| Eight exponentiation inverses → hybrid terminal inversion | 4,781 [4,775, 4,793] | 1,408 [1,405, 1,410] | -70.6% |
+| Unfused → fused forward pass, including broadcasts | 2,668 [2,662, 2,670] | 2,641 [2,637, 2,646] | -1.0% |
+| Unfused → fused reverse pass | 1,602 [1,600, 1,605] | 1,496 [1,496, 1,499] | -6.6% |
+| Grouped → planar forward scratch | 2,669 [2,661, 2,675] | 2,773 [2,768, 2,779] | +3.9% |
+| Broadcast per pass → cached vector offset | 2,641 [2,635, 2,648] | 2,550 [2,545, 2,551] | -3.4% |
+
+Hybrid preparation including both fused passes measured 5,547 [5,537, 5,561] ns versus 8,825 [8,816, 8,831] ns with exponentiation. Carry scheduling was independently useful: reducing three normalization rounds to the proven two lowered generation from 19.74 to 16.36 ns/key. Fusion then reduced it to about 16.14 ns/key. Planar scratch was rejected. Cached vector offsets saved approximately 91 ns per forward pass, but need a larger shared table and lack a demonstrated complete-workload win; that component remains a fixture, not a claimed production improvement.
+
+### Canonical filtering and vector width
+
+The first IFMA baseline serialized all 512 Y coordinates into the existing matcher. The second path canonically reduces each vector, forms the first 64 canonical bits and tests an initialization-time prefix plan. It supports a single anchored prefix and eligible small anchored sets of up to eight probes. A long prefix may use a necessary first-word condition; every survivor still gets its exact sign and full verification. Separate plus/minus lane masks are interleaved in the original candidate order. Only survivors are extracted, while every rejected candidate still increments `Checked`; a hit invalidates its pending sibling exactly as before.
+
+| Complete-search filtering comparison | Serialize all, ns/key | Canonical-word filter, ns/key | Change |
+| --- | ---: | ---: | ---: |
+| Rare prefix | 17.41 [17.39, 17.46] | 14.38 [14.37, 14.39] | -17.4% |
+| Three prefixes | 18.42 [18.42, 18.42] | 14.42 [14.41, 14.44] | -21.7% |
+| Frequent prefix | 26.79 [26.73, 26.80] | 23.65 [23.61, 23.79] | -11.7% |
+
+These are seven-sample medians from the isolated filter screen. Canonicalization is not omitted for rejected lanes. Unsupported plans use the serialized baseline, preserving the existing dictionary, suffix and anywhere semantics.
+
+The four-lane experiment uses actual YMM IFMA through AVX-512VL, compact five-by-four storage, 64 groups and four prefix chains. It is not eight-way work with half the lanes masked. Comparisons use equal total operations/candidates, including conversion and inversion:
+
+| Width comparison | Eight lanes | Four lanes | Four-lane change |
+| --- | ---: | ---: | ---: |
+| Multiply eight field values, ns/op | 18.70 [18.59, 18.90] | 36.61 [36.43, 36.84] | +95.8% |
+| Pack/unpack eight field values, ns/op | 46.22 [46.18, 46.45] | 46.99 [46.81, 47.21] | +1.7% |
+| Hybrid inversion of eight values, ns/op | 1,405 [1,401, 1,409] | 2,637 [2,635, 2,641] | +87.7% |
+| Complete generation, ns/key | 16.12 [16.06, 16.19] | 25.57 [25.54, 25.64] | +58.6% |
+| Complete filtered rare search, ns/key | 14.35 [14.32, 14.38] | 24.11 [24.09, 24.16] | +68.0% |
+| Complete dictionary search, ns/key | 41.11 [41.03, 41.18] | 50.32 [50.25, 50.74] | +22.4% |
+
+The eight-output inversion microbenchmark invokes the four-lane hybrid twice; complete generation still uses one scalar inversion across all 256 centers in either width. On this CPU, four lanes lost consistently, so no four-lane production backend or speculative CPU-model policy is shipped. The fixture remains reproducible through an overlay. This finding is not evidence that the widest vector always wins on other CPUs.
+
+### Dictionary, anywhere and immediate checksum
+
+Dictionary experiments preserved the existing 15-bit fingerprints, stride-four probes, sign alternatives, neighbor admission masks and exact verification. Three independently enabled stages tested vector window extraction, gathered membership words and gathered membership plus VPOPCNTDQ-assisted rank calculation. Ordinary and shared-prefix dictionaries were measured separately. All three lost:
+
+| Complete dictionary search, ns/key | Existing matcher | Extraction | + Membership | + Rank popcount |
+| --- | ---: | ---: | ---: | ---: |
+| Ordinary 512 literals | 42.34 [42.30, 42.41] | 52.75 [52.64, 52.94] (+24.6%) | 52.30 [52.24, 52.41] (+23.5%) | 53.80 [53.72, 55.28] (+27.1%) |
+| Shared 512 literals | 41.93 [41.90, 41.97] | 52.34 [52.27, 52.56] (+24.8%) | 52.18 [52.12, 52.83] (+24.4%) | 53.65 [53.51, 55.09] (+28.0%) |
+
+The table uses the extraction screen's reference for compact relative comparisons; each stage also had its own alternating reference. Full anywhere timings differed only slightly, about 26.44 versus 26.06 ns/key, while matcher-only vector extraction took about 35.49 versus 10.86 ns/op. Most candidates in that complete-search fixture reject before reaching the experimental scan, so its small timing difference is not evidence of a profitable extraction stage. None of these matcher components met the retention criterion. They remain local correctness/benchmark fixtures outside production.
+
+The checksum experiment instead operates on **one message immediately**. The fixed 48-byte input is `.onion checksum || public-key || 0x03`, followed by SHA3 domain padding `0x06` and the final high bit in the 136-byte rate block. All 24 Keccak rounds run. Each state word is held in a vector register with replicated lanes; vector rotates and ternary Boolean operations reduce instruction overhead, without collecting additional matches. The first two output bytes retain the existing checksum semantics. Dispatch requires AVX-512F and OS state, independently of IFMA.
+
+| Checksum comparison | Original | Immediate AVX-512 | Change |
+| --- | ---: | ---: | ---: |
+| One checksum, ns/op | 258.8 [258.0, 259.4] | 189.1 [188.9, 189.9] | -26.9% |
+| Complete `.a` search with original generator, ns/key | 458.9 [457.3, 467.5] | 415.2 [414.2, 426.8] | -9.5% |
+
+The complete-workload gain justifies retaining this component. Rare-prefix and longer-suffix differences in the isolated checksum experiment were too small or noisy to claim a win. Ordinary key serialization/hostname generation retains its existing checksum implementation; only selected search workers call the accelerated checksum.
+
+### Retained combination and isolation
+
+The final combination retains eight-way IFMA, two-round normalization, hybrid inversion, fused passes, canonical prefix masks and immediate single-state checksum workers. The following results remeasure that combination, rather than adding isolated percentage improvements:
+
+| Workload | Original ns/key | Auto ns/key | Change |
+| --- | ---: | ---: | ---: |
+| Complete generation, including serialization | 37.83 [37.78, 38.25] | 16.06 [16.03, 16.12] | -57.5% |
+| Rare prefix | 39.18 [39.13, 39.58] | 14.28 [14.23, 14.37] | -63.6% |
+| Three anchored prefixes | 40.11 [39.99, 40.58] | 14.40 [14.36, 14.54] | -64.1% |
+| Frequent prefix | 48.59 [48.35, 48.88] | 23.57 [23.42, 23.70] | -51.5% |
+| Ordinary dictionary, 512 literals | 62.57 [62.50, 63.33] | 40.96 [40.87, 41.31] | -34.5% |
+| Shared dictionary, 512 literals | 62.22 [62.03, 62.74] | 40.77 [40.50, 41.11] | -34.5% |
+| Mixed dictionary, 512 literals | 66.12 [65.69, 66.76] | 44.60 [44.18, 45.10] | -32.5% |
+| Anywhere | 47.24 [47.16, 47.81] | 25.73 [25.60, 25.88] | -45.5% |
+| `.a` | 460.9 [458.8, 461.8] | 416.5 [416.1, 420.9] | -9.6% |
+| `.aa` | 53.38 [53.18, 55.41] | 30.48 [30.14, 30.74] | -42.9% |
+| `.aaa` | 39.73 [39.69, 41.41] | 18.20 [18.02, 18.45] | -54.2% |
+| `.aaaa` | 39.28 [39.20, 40.28] | 17.71 [17.56, 18.11] | -54.9% |
+| One-character prefix | 322.8 [321.6, 326.7] | 322.7 [321.6, 324.4] | -0.03%, noise |
+| Short dictionary, 512 literals | 492.35 [485.9, 540.4] | 494.95 [485.7, 500.1] | +0.5%, noise |
+| Every candidate matches | 7,812 [7,764, 7,872] | 7,769 [7,750, 7,855] | -0.6%, noise |
+
+Generation, three-prefix, anywhere and all-hit fixtures compare scalar/selected implementations in the same final test binary; the established full-search and suffix fixtures compare the preserved pre-edit binary with the final binary. Frequent independent-walk cases do not acquire vector paired state. No improvement is claimed for the noise-sized rows.
+
+Forced-AVX2 isolation required correcting an early design: adding checksum cases to the ordinary matcher enlarged its inlined search loop and produced about a 1% rare-prefix regression. Dedicated checksum loops removed that change. The original and final ordinary paired loops both contain 597 disassembled instructions and the same `0x198` stack frame; their batch dispatcher again checks the original paired engine first. A redundant return from the benchmark setup helper was also removed to restore an equivalent benchmark frame. No padding or CPU-specific layout workaround was introduced. The final seven-pair fallback comparison was:
+
+| Complete search | Original ns/key | Forced AVX2 ns/key | Change |
+| --- | ---: | ---: | ---: |
+| Rare prefix | 39.20 [39.12, 39.51] | 39.32 [39.25, 39.70] | +0.3% |
+| Frequent prefix | 48.42 [48.37, 48.87] | 48.52 [48.46, 49.16] | +0.2% |
+| Ordinary dictionary | 62.51 [62.39, 63.06] | 62.73 [62.55, 63.30] | +0.4% |
+| Shared dictionary | 62.64 [62.04, 63.91] | 62.52 [62.44, 62.96] | -0.2% |
+| Mixed dictionary | 66.40 [66.11, 68.35] | 66.42 [65.72, 69.11] | +0.03% |
+| Short dictionary | 489.1 [487.7, 497.4] | 497.6 [486.9, 512.6] | +1.7% |
+
+Earlier ten-pair confirmations of the main workload set did not show a consistent slowdown, but the final medians above are not uniformly neutral. A separate ten-pair, 100,000-batch `.aa` confirmation measured 53.485 [53.34, 53.61] versus 53.530 [53.47, 53.70] ns/key (+0.08%). Its paired mean difference was +0.079 ns/key, with a 95% Student-t interval of [+0.022, +0.136]. An identical-original-binary control produced +0.043 ns/key with interval [-0.096, +0.182]. This control demonstrates background variability; it does not negate the positive candidate comparison. Consequently, the strict no-measurable-regression criterion remains unresolved at sub-percent scale, despite preserving the original candidate implementation. A quieter controlled fallback comparison is still required; the results support the substantial auto-mode gains, not a certified zero-cost fallback.
+
+### Correctness, instruction inspection and limits
+
+Arithmetic tests compare multiplication, dedicated squaring, addition and subtraction with `math/big`, including normalized limb maxima, noncanonical residues, zero and input/output aliases. Canonical reduction and mask decisions are compared lane-by-lane. Generated signed and unsigned ranges span 130 batches and table transitions, with independent scalar-base multiplication checks; filtered decisions are compared for every candidate, not just reported hits. Differential search tests cover ordinary/shared dictionaries, prefixes, suffixes, frequent/all-hit cases, pending-sibling invalidation, exact counters, reseeding and near-epoch limits. Saved keys are independently checked for scalar/public agreement, Ed25519 signing and hostname checksum correctness. Checksum-worker tests compare hit order and accounting with the original worker, including AVX-512F available without IFMA.
+
+Feature tests remove each required CPUID bit and each required XCR0 state bit independently and verify that forced AVX2 never calls the new query. Hardware-gated tests and fixtures do not force unsupported instructions. PACE native/purego and stock-Go native/purego test matrices passed with `-vet=off`, one package/test worker and `GOMAXPROCS=1`. Custom vet passed for Windows/Linux/Darwin on amd64 and arm64. One-worker fuzz runs completed about 1.13 million IFMA, 416 thousand paired, 59 thousand sign-filter and 11 thousand dictionary cases. Stock-Go Linux race suites passed for native and purego builds under WSL, where AVX-512F/IFMA and OS state were available. PACE and stock-Go Windows race attempts both failed before tests because ThreadSanitizer could not allocate its shadow region (error 87); Windows/PACE race validation remains blocked, not passed.
+
+PACE instruction inspection confirmed actual IFMA/EVEX instructions, zero-frame native leaves, no stack spills in those handwritten leaves, preserved R14 and X15 and `VZEROUPPER` on return paths. The multiply/square kernels contain 25/15 low/high IFMA pairs. The scalar divsteps bridge uses ordinary Go stack buffers. Separately collected profiles show the bottleneck moving from scalar preparation/reverse passes to vector preparation/reverse passes and scalar terminal inversion; the `.a` profile includes the immediate Keccak leaf. Profiles are diagnostic shares, not timing samples or hardware-counter evidence.
+
+These findings apply to this single CPU and single-worker setup. **Multicore performance is unmeasured in this pass.** SMT behavior, multicore scaling, sustained all-core frequency/power and CPU-specific width policies are deferred to a later controlled environment. No all-core throughput is extrapolated from SIMD lanes or these timings. Historical multicore evidence below predates this extension and does not validate its multicore behavior.
 
 ## Multicore search
 
 ### Ownership and coordination
 
-This pass started from clean SHA `ccf7acd2ac359ee666b77ba997f4eb4e5ee93379`. The unchanged checkout was compiled and measured before edits; its test binary was retained for alternating comparisons. The arithmetic, matcher dispatch, AVX2 ceiling and existing `Run`/`RunWithProgress` implementations remain unchanged. `RunWithOptions` dispatches directly to the existing path for one unpinned worker. The CLI defaults to `--cpu 1`, resolves `all` against process availability, rejects excessive counts and sets `GOMAXPROCS` once. Libraries do not set it.
+The historical multicore pass started from clean SHA `ccf7acd2ac359ee666b77ba997f4eb4e5ee93379`. The unchanged checkout was compiled and measured before edits; its test binary was retained for alternating comparisons. That pass preserved the arithmetic, matcher dispatch, then-current AVX2 ceiling and existing `Run`/`RunWithProgress` implementations. `RunWithOptions` dispatches directly to the existing path for one unpinned worker. The CLI defaults to `--cpu 1`, resolves `all` against process availability, rejects excessive counts and sets `GOMAXPROCS` once. Libraries do not set it.
 
 Parallel workers persist for the search lifetime. Each initializes after pinning and owns its generator, independent OS-secure seeds, pending candidates, scratch and ordinary counters. There are no candidate queues or recurring barriers. Workers check cancellation between existing 512-checked-candidate batches and publish cumulative counters every 128 batches into separate 256-byte atomic slots. Padding isolates writers even if the allocation is not cache-line aligned. A coordinator samples about every four seconds; publication can lag by up to 65,536 checks per active worker. Final publication and joining every worker make returned totals exact, including partially completed failed batches.
 
@@ -131,23 +269,11 @@ The strict no-reproducible-single-worker-regression goal is **not fully met**: d
 
 ### Reproducing the multicore pass
 
-Create `measurements` if necessary. Before modifying a clean starting checkout, retain its ordinary test binary using `pace test -vet=off -c -pgo=off -o measurements/multicore-baseline.exe ./internal/search`. Build both versions with the same PACE toolchain and `GOAMD64=v1`; the starting SHA above identifies the baseline. Current-tree Windows commands are:
-
-```powershell
-$env:GOAMD64 = "v1"
-pace test -vet=off -c -pgo=off -o measurements/multicore-single-final.exe ./internal/search
-pace test -vet=off -c -pgo=off -tags measure -o measurements/multicore-candidate.exe ./internal/search
-./scripts/measure-single.ps1 -Baseline measurements/multicore-baseline.exe -Candidate measurements/multicore-single-final.exe -Name multicore-single-warm -Time 2s -Count 5 -Affinity 4
-./scripts/measure-multicore.ps1 -Name placement -Workloads rare -Workers 2,8,16,32 -Modes parallel -Seconds 5 -Repeats 3
-./scripts/measure-multicore.ps1 -Name scaling -Placements spread -Seconds 5 -Repeats 3
-./scripts/measure-multicore.ps1 -Name sustained -Workloads rare -Workers 16,32 -Placements spread -Seconds 30 -Repeats 3
-./scripts/measure-multicore.ps1 -Name processes -Workers 2,8,16,32 -Seconds 5 -Repeats 3 -Processes
-./scripts/measure-multicore.ps1 -Name persistence -Workloads persistence -Workers 1,4,16 -Placements spread -Modes progress -Seconds 5 -Repeats 3
-```
+Before modifying a clean starting checkout, retain its ordinary search-test binary. Build both versions with `pace test -vet=off -c -pgo=off ./internal/search`, the same PACE toolchain and `GOAMD64=v1`; the starting SHA above identifies the baseline. The opt-in multicore harness additionally requires `-tags measure`. The single-worker comparison used five alternating two-second samples pinned to logical CPU 2. These reproduction details describe the historical multicore pass, not work performed in the AVX-512 pass.
 
 `-Affinity 4` means logical CPU 2 on this one-group measurement host; choose an allowed CPU on other machines. Run benchmarks serially. `measure-multicore.ps1` defaults to workers 1,2,4,8,16,24,32 and reference/parallel/progress modes, skips unavailable counts and imposes a three-hour test timeout. The default search-only matrix is bounded but lengthy. Portable invocation uses `ONINO_MEASURE=rare ONINO_WORKERS=1,2,4,8,16,24,32 ONINO_PLACEMENTS=spread ONINO_SECONDS=5 ONINO_REPEATS=3 pace test -vet=off -tags measure ./internal/search -run '^TestMeasureMulticore$' -v -timeout 3h`. Process comparisons use `ONINO_PROCESSES=2,8,16,32` and `TestMeasureProcesses` instead.
 
-The harness emits `MEASURE` JSON with exact checked/saved totals, elapsed duration, aggregate/average per-worker rates, allocation deltas and actual group/CPU/core/cache selections. The recorded local artifacts are `measurements/multicore-{rare,frequent,512,shared512,all_hits}.txt`, `multicore-placement-{screen,sustained}.txt`, `multicore-sustained.txt`, `multicore-processes.txt`, `multicore-persistence.txt` and `multicore-single-warm-{before,after}.txt`. Raw measurements and test binaries are ignored; the tables above retain the conclusions. Measurement controls live only in test builds/scripts and ordinary tests never launch a search experiment.
+The harness emits `MEASURE` JSON with exact checked/saved totals, elapsed duration, aggregate/average per-worker rates, allocation deltas and actual group/CPU/core/cache selections. Raw logs and test binaries are ignored; the tables above retain the conclusions. Measurement controls live only in test builds/scripts and ordinary tests never launch a search experiment.
 
 ### Multicore validation and limits
 
@@ -563,7 +689,7 @@ For example, run `pace test -vet=off ./internal/search -run '^$' -fuzz '^FuzzPai
 
 ### Baseline and retained implementation
 
-This pass starts at `15ccb81`. Relative to the requested reference `c08dd8d76e2f116419de824d685dc19828e7e311`, only README, release-workflow and SVG files changed; matcher and search code are identical. Before editing, the original search-test and CLI executables were preserved as `measurements/anchored-original-search.exe` and `measurements/anchored-original-cli.exe`. A second baseline, `anchored-baseline.exe`, includes the new benchmark fixtures but precedes the production optimization. `anchored-baseline-measure.exe` adds the existing opt-in `measure` harness. Candidate executables were preserved separately throughout the experiment.
+This pass starts at `15ccb81`. Relative to the requested reference `c08dd8d76e2f116419de824d685dc19828e7e311`, only README, release-workflow and SVG files changed; matcher and search code are identical. Original search-test and CLI executables were preserved before editing. A second baseline includes the new benchmark fixtures but precedes the production optimization; a third adds the existing opt-in `measure` harness. Candidate executables were preserved separately throughout the experiment.
 
 Retained: `matcherSingleWordSet`, one little-endian word load and a scalar loop comparing `word & probe.mask == probe.value`. Compilation selects it only after the existing exclusions and empty handling, when there are multiple probes, one table holds every probe and that table has no residual checks. The selected table is copied into `tables[0]` and its byte offset uses the existing field. Matcher size does not grow. Each probe keeps its own mask. Single-probe, cross-word, scan, character, anchored-index and dictionary paths retain their constraints; boundary/signless children may specialize without bypassing their enclosing exact/checksum logic.
 
@@ -589,45 +715,16 @@ The first screen reproduces one pinned logical CPU (CPU 2, affinity mask 4), `GO
 
 Worker validation uses the existing production coordinator, deterministic per-worker streams, spread physical-core-first pinning, a 200 ms warm-up per worker and synchronized start. Four alternating pairs use three seconds per workload at 1, 16 and 32 workers. These are process-level throughput measurements, so they should not be compared directly with the pinned batch-loop timings. Final CLI validation uses four alternating ten-second pairs at 32 workers, normal secure entropy and normal filesystem persistence. The helper sends a Windows process-group CTRL_BREAK for graceful final counters. Rates use all checked keys over elapsed time, never time-to-first-match.
 
-### Exact reproduction commands
+### Reproduction
 
-Run from the repository root. The measurement scripts are preserved under `internal/search/testdata/anchored/`; during the measurements they ran from the ignored `scripts/` directory with identical behavior. `measure-single.ps1` is the existing single-core harness. Build the baseline after adding the fixture files and before changing `pattern.go`/`pattern_compile.go`; the original binaries precede even those fixture edits. The shared/explicit binaries refer to temporary variants described above, which were removed after measurement. Logs and executables remain in the ignored `measurements/` directory; the raw per-key samples are also recorded below.
+Run from the repository root using the scripts under `internal/search/testdata/anchored/`. Build the fixture baseline before changing `pattern.go`/`pattern_compile.go`, with `GOAMD64=v1` and `pace test -vet=off -pgo=off -c ./internal/search`; the original binaries precede even those fixture edits. Add `-tags measure` for the opt-in worker harness. The temporary shared-mask and explicit-comparison variants were removed after evaluation. Raw per-key samples remain recorded below.
 
 ```powershell
-$env:GOAMD64 = 'v1'
-$env:GODEBUG = 'cpu.avx512f=off,cpu.avx512bw=off,cpu.avx512vl=off'
-New-Item -ItemType Directory -Force measurements | Out-Null
-pace test -vet=off -pgo=off -c -o measurements/anchored-original-search.exe ./internal/search
-pace build -pgo=off -o measurements/anchored-original-cli.exe .
-# After adding fixtures, before modifying production matching:
-pace test -vet=off -pgo=off -c -o measurements/anchored-baseline.exe ./internal/search
-pace test -vet=off -pgo=off -tags measure -c -o measurements/anchored-baseline-measure.exe ./internal/search
-# Build each temporary variant at its respective revision:
-pace test -vet=off -pgo=off -c -o measurements/anchored-scalar.exe ./internal/search
-pace test -vet=off -pgo=off -c -o measurements/anchored-shared.exe ./internal/search
-pace test -vet=off -pgo=off -c -o measurements/anchored-explicit.exe ./internal/search
-# Return to retained scalar code:
-pace test -vet=off -pgo=off -tags measure -c -o measurements/anchored-scalar-measure.exe ./internal/search
-pace build -pgo=off -o measurements/anchored-scalar-cli.exe .
-
 $single = 'internal/search/testdata/anchored/measure-single.ps1'
-& $single -Baseline measurements/anchored-baseline.exe -Candidate measurements/anchored-scalar.exe -Name anchored-scalar-screen -Bench '^Benchmark(AnchoredSearch|FullSearch|SuffixCosts)$' -Time 350ms -Count 6 -Affinity 4
-& $single -Baseline measurements/anchored-baseline.exe -Candidate measurements/anchored-scalar.exe -Name anchored-scalar-confirm -Bench '^BenchmarkAnchoredSearch$/(donate|privacy|rare|three6|three7)$' -Time 2s -Count 6 -Affinity 4
-& $single -Baseline measurements/anchored-scalar.exe -Candidate measurements/anchored-shared.exe -Name anchored-shared-screen -Bench '^Benchmark(AnchoredSearch|FullSearch)$' -Time 350ms -Count 6 -Affinity 4
-& $single -Baseline measurements/anchored-scalar.exe -Candidate measurements/anchored-shared.exe -Name anchored-shared-confirm -Bench '^Benchmark(AnchoredSearch|FullSearch)$/(donate|privacy|rare|three6|three7|cross_word|set63|all_hits|short512)$' -Time 2s -Count 6 -Affinity 4
-& $single -Baseline measurements/anchored-scalar.exe -Candidate measurements/anchored-explicit.exe -Name anchored-explicit-screen -Bench '^Benchmark(AnchoredSearch|FullSearch)$' -Time 350ms -Count 6 -Affinity 4
-& $single -Baseline measurements/anchored-scalar.exe -Candidate measurements/anchored-explicit.exe -Name anchored-explicit-confirm -Bench '^Benchmark(AnchoredSearch|FullSearch)$/(donate|privacy|rare|three6|three7|cross_word|set2|set4|512)$' -Time 2s -Count 6 -Affinity 4
-& $single -Baseline measurements/anchored-baseline.exe -Candidate measurements/anchored-scalar.exe -Name anchored-dictionary-screen -Bench '^BenchmarkDictionarySearch$' -Time 350ms -Count 6 -Affinity 4
-
-& internal/search/testdata/anchored/measure-workers.ps1 -Workers '16,32' -Name anchored-workers-many -Pairs 4
-& internal/search/testdata/anchored/measure-workers.ps1 -Workers '1' -Name anchored-workers-one -Pairs 4
-go build -pgo=off -o measurements/anchored-cli-runner.exe internal/search/testdata/anchored/measure-cli_windows.go
-& measurements/anchored-cli-runner.exe
-# The helper executes both baseline and scalar, four alternating pairs:
-# <binary> --cpu 32 --output measurements/anchored-cli-<pair>-<side>-matches donate. mirror. secure.
-
-pace tool objdump -s searchBatch measurements/anchored-baseline.exe
-pace tool objdump -s searchBatch measurements/anchored-scalar.exe
+& $single -Baseline $Baseline -Candidate $Candidate -Name anchored-screen -Bench '^Benchmark(AnchoredSearch|FullSearch|SuffixCosts)$' -Time 350ms -Count 6 -Affinity 4
+& $single -Baseline $Baseline -Candidate $Candidate -Name anchored-confirm -Bench '^BenchmarkAnchoredSearch$/(donate|privacy|rare|three6|three7)$' -Time 2s -Count 6 -Affinity 4
+pace tool objdump -s searchBatch $Baseline
+pace tool objdump -s searchBatch $Candidate
 pace test -vet=off -pgo=off ./...
 pace test -vet=off -pgo=off -tags purego ./...
 go test -vet=off -pgo=off ./...
@@ -868,19 +965,19 @@ PACE and stock-Go native/purego full suites passed with `-vet=off -pgo=off`. Lin
 
 ### Measurement protocol and commands
 
-The baseline is `c0ebb42`, with its pre-edit search test binary preserved as `measurements/queued-before.exe`. Measurements use the same Windows/9950X3D host, PACE Go 1.27.1, `GOAMD64=v1`, `-pgo=off` and AVX2 maximum as above. The initial pinned batch-loop check uses four alternating one-second pairs after warm-up. The production-worker experiment compares synchronous and queued modes in the same binary, with a 200 ms warm-up per worker, spread placement, identical worker counts and four alternating pairs. Rare/three-prefix controls use deterministic per-worker streams and a cheap sink; `persist_prefix` uses `abcd.`, secure entropy and the real `onion.Store` in a temporary output directory. Its measured duration includes cancellation and the entire final save drain. These are production search/store measurements, not CLI or time-to-first-match measurements.
+The historical queued-saving baseline is `c0ebb42`, whose search-test binary was preserved before editing. Those measurements used the same Windows/9950X3D host, PACE Go 1.27.1, `GOAMD64=v1`, `-pgo=off` and the then-current AVX2 maximum. The initial pinned batch-loop check uses four alternating one-second pairs after warm-up. The production-worker experiment compares synchronous and queued modes in the same binary, with a 200 ms warm-up per worker, spread placement, identical worker counts and four alternating pairs. Rare/three-prefix controls use deterministic per-worker streams and a cheap sink; `persist_prefix` uses `abcd.`, secure entropy and the real `onion.Store` in a temporary output directory. Its measured duration includes cancellation and the entire final save drain. These are production search/store measurements, not CLI or time-to-first-match measurements.
 
 ```powershell
 $env:GOAMD64 = "v1"
 $env:GODEBUG = "cpu.avx512f=off,cpu.avx512bw=off,cpu.avx512vl=off"
 # Preserve this binary before editing the baseline.
-pace test -vet=off -pgo=off -c -o measurements/queued-before.exe ./internal/search
+pace test -vet=off -pgo=off -c -o $Baseline ./internal/search
 # Build after implementing the queue.
-pace test -vet=off -pgo=off -c -o measurements/queued-after.exe ./internal/search
-pace test -vet=off -pgo=off -tags measure -c -o measurements/queued-measure.exe ./internal/search
-./internal/search/testdata/anchored/measure-single.ps1 -Baseline measurements/queued-before.exe -Candidate measurements/queued-after.exe -Name queued-miss -Bench '^BenchmarkAnchoredSearch/(donate|privacy|rare|three6)$' -Time 1s -Count 4
-./internal/search/testdata/anchored/measure-workers.ps1 -Baseline measurements/queued-measure.exe -Candidate measurements/queued-measure.exe -CandidateMode queued -Name queued-workers -Workloads "rare,three6,persist_prefix" -Workers "1,32" -Seconds 3 -Pairs 4
-./internal/search/testdata/anchored/measure-workers.ps1 -Baseline measurements/queued-measure.exe -Candidate measurements/queued-measure.exe -CandidateMode queued -Name queued-single-persistence -Workloads persist_prefix -Workers 1 -Seconds 10 -Pairs 4
+pace test -vet=off -pgo=off -c -o $Candidate ./internal/search
+pace test -vet=off -pgo=off -tags measure -c -o $WorkerBinary ./internal/search
+./internal/search/testdata/anchored/measure-single.ps1 -Baseline $Baseline -Candidate $Candidate -Name queued-miss -Bench '^BenchmarkAnchoredSearch/(donate|privacy|rare|three6)$' -Time 1s -Count 4
+./internal/search/testdata/anchored/measure-workers.ps1 -Baseline $WorkerBinary -Candidate $WorkerBinary -CandidateMode queued -Name queued-workers -Workloads "rare,three6,persist_prefix" -Workers "1,32" -Seconds 3 -Pairs 4
+./internal/search/testdata/anchored/measure-workers.ps1 -Baseline $WorkerBinary -Candidate $WorkerBinary -CandidateMode queued -Name queued-single-persistence -Workloads persist_prefix -Workers 1 -Seconds 10 -Pairs 4
 pace test -vet=off -pgo=off ./...
 pace test -vet=off -pgo=off -tags purego ./...
 go test -vet=off -pgo=off ./...
@@ -893,7 +990,7 @@ vet --tests --os darwin ./...
 wsl.exe --cd /mnt/c/Users/Laura/onino --exec bash -lc 'go test -vet=off -race -pgo=off ./internal/search && go test -vet=off -race -pgo=off -tags purego ./internal/search'
 ```
 
-The worker harness now accepts optional baseline/candidate modes, each defaulting to `parallel`. Original logs are `measurements/queued-miss-{before,after}.txt`, `queued-workers-<pair>-{before,after}.txt` and `queued-single-persistence-<pair>-{before,after}.txt`. Worker logs retain exact checked/saved counts, elapsed seconds, allocations and placements as `MEASURE` JSON. Startup queue allocation is outside the worker measurement gate; reported steady-interval allocations include bounded coordinator/shutdown work and, for persisted workloads, normal filesystem allocation. Separate allocation assertions cover the queue hit path itself.
+The worker harness now accepts optional baseline/candidate modes, each defaulting to `parallel`. Worker logs retain exact checked/saved counts, elapsed seconds, allocations and placements as `MEASURE` JSON. Startup queue allocation is outside the worker measurement gate; reported steady-interval allocations include bounded coordinator/shutdown work and, for persisted workloads, normal filesystem allocation. Separate allocation assertions cover the queue hit path itself.
 
 ### Pinned batch-loop regression check
 

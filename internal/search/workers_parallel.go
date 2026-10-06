@@ -12,6 +12,7 @@ import (
 	"github.com/coalaura/onino/internal/cpu"
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 const publishBatches = 128
@@ -24,6 +25,7 @@ type Options struct {
 	Workers  int
 	CPUs     []cpu.CPU
 	Progress func(Stats)
+	SIMD     simd.Mode
 }
 
 // The unused tail separates live counters even when the allocation itself is
@@ -152,6 +154,8 @@ func (run *parallelRun) work(index int) {
 
 		if state.paired != nil {
 			state.paired.sink = sink
+		} else if state.accelerated != nil {
+			state.accelerated.setSink(sink)
 		} else {
 			state.walk.sink = sink
 		}
@@ -186,7 +190,7 @@ func RunWithOptions(ctx context.Context, matcher *pattern.Matcher, save SaveFunc
 	}
 
 	if options.Workers == 1 && len(options.CPUs) == 0 {
-		return RunWithProgress(ctx, matcher, save, options.Progress)
+		return runWithSIMD(ctx, matcher, save, options.Progress, options.SIMD)
 	}
 
 	err = ctx.Err()
@@ -194,7 +198,8 @@ func RunWithOptions(ctx context.Context, matcher *pattern.Matcher, save SaveFunc
 		return Stats{}, err
 	}
 
-	hooks := parallelHooks{create: createSecureWorker, pin: cpu.Pin, interval: progressInterval}
+	features := simd.Detect(options.SIMD)
+	hooks := secureHooks(features)
 
 	return runParallel(ctx, matcher, save, options, hooks)
 }
@@ -263,7 +268,21 @@ func createSecureWorker(_ int, matcher *pattern.Matcher) (*worker, error) {
 	return newWorker(rand.Reader, matcher)
 }
 
+func secureHooks(features simd.Features) parallelHooks {
+	return parallelHooks{
+		create: func(_ int, matcher *pattern.Matcher) (*worker, error) {
+			return newWorkerWithSIMD(rand.Reader, matcher, features)
+		},
+		pin:      cpu.Pin,
+		interval: progressInterval,
+	}
+}
+
 func validateOptions(options Options) error {
+	if options.SIMD != simd.Auto && options.SIMD != simd.AVX2 {
+		return errors.New("invalid SIMD mode")
+	}
+
 	if options.Workers < 1 {
 		return errors.New("search requires at least one worker")
 	}

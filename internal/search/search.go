@@ -9,6 +9,7 @@ import (
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 // Stats counts candidates checked and matches successfully saved.
@@ -58,6 +59,10 @@ func Run(ctx context.Context, matcher *pattern.Matcher, save SaveFunc) (Stats, e
 // RunWithProgress is Run with an optional synchronous progress callback, called
 // about every four seconds at a batch boundary on the same search worker.
 func RunWithProgress(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, report func(Stats)) (Stats, error) {
+	return runWithSIMD(ctx, matcher, save, report, simd.Auto)
+}
+
+func runWithSIMD(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, report func(Stats), mode simd.Mode) (Stats, error) {
 	var stats Stats
 
 	if matcher == nil || save == nil {
@@ -69,7 +74,9 @@ func RunWithProgress(ctx context.Context, matcher *pattern.Matcher, save SaveFun
 		return stats, err
 	}
 
-	state, err := newWorker(rand.Reader, matcher)
+	features := simd.Detect(mode)
+
+	state, err := newWorkerWithSIMD(rand.Reader, matcher, features)
 	if err != nil {
 		return stats, err
 	}

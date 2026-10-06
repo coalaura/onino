@@ -48,3 +48,31 @@ func TestCPUFlag(t *testing.T) {
 		}
 	}
 }
+
+func TestSIMDFlag(t *testing.T) {
+	previous := runtime.GOMAXPROCS(0)
+	defer runtime.GOMAXPROCS(previous)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	values := []string{"auto", "avx2", "", "avx512", "AUTO"}
+
+	for _, value := range values {
+		command := newCommand()
+
+		output := new(bytes.Buffer)
+
+		command.Writer = output
+		command.ErrWriter = output
+
+		arguments := []string{"onino", "--simd", value, "--output", t.TempDir(), "rare."}
+
+		err := command.Run(ctx, arguments)
+		valid := value == "auto" || value == "avx2"
+
+		if (err == nil) != valid {
+			t.Fatalf("--simd %q: %v", value, err)
+		}
+	}
+}

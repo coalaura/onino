@@ -15,6 +15,7 @@ import (
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
 	"github.com/coalaura/onino/internal/search"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 func main() {
@@ -36,6 +37,11 @@ func newCommand() *cli.Command {
 		Description: "Patterns match the first 52 visible lowercase base32 characters of the onion hostname.\nSuffixes end at character 52, before the final four checksum/version characters.\nForms: prefix.  .suffix  prefix.suffix  .interior.  anywhere",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
+				Name:  "simd",
+				Value: "auto",
+				Usage: "Optional SIMD: auto or avx2 (disable all onino AVX-512 paths)",
+			},
+			&cli.StringFlag{
 				Name:  "cpu",
 				Value: "1",
 				Usage: "Search workers: a positive integer or all available logical CPUs",
@@ -54,6 +60,11 @@ func newCommand() *cli.Command {
 func runSearch(ctx context.Context, command *cli.Command) error {
 	if command.NArg() == 0 {
 		return errors.New("at least one pattern is required")
+	}
+
+	mode, err := simd.Parse(command.String("simd"))
+	if err != nil {
+		return err
 	}
 
 	matcher, err := pattern.CompilePatterns(command.Args().Slice())
@@ -123,7 +134,7 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		command.ErrWriter.Write(line)
 	}
 
-	options := search.Options{Workers: workers, CPUs: processors, Progress: progress}
+	options := search.Options{Workers: workers, CPUs: processors, Progress: progress, SIMD: mode}
 
 	stats, err := search.RunQueued(ctx, matcher, func(key onion.Key, found time.Time) error {
 		saveError := store.Save(key)

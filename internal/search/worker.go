@@ -7,13 +7,18 @@ import (
 )
 
 type worker struct {
-	paired *pairedGenerator
-	walk   *generator
+	paired      *pairedGenerator
+	walk        *generator
+	accelerated *acceleratedWorker
 }
 
 func (state *worker) searchBatch(matcher *pattern.Matcher, save SaveFunc, stats *Stats) error {
 	if state.paired != nil {
 		return state.paired.searchBatch(matcher, save, stats)
+	}
+
+	if state.accelerated != nil {
+		return state.accelerated.searchBatch(matcher, save, stats)
 	}
 
 	if state.walk.round == reseedRounds {
