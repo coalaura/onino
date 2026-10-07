@@ -35,15 +35,27 @@ func backendFlags(flags []cli.Flag) []cli.Flag {
 		Name:  "gpu",
 		Value: "off",
 		Usage: "Vulkan prefix search: off, auto, or physical device index; --cpu 0 or --cpu off selects GPU only",
+	}, &cli.IntFlag{
+		Name:  "gpu-streams",
+		Value: gpu.DefaultStreams,
+		Usage: "GPU resident streams (1-16384); requires --gpu",
+	}, &cli.IntFlag{
+		Name:  "gpu-rounds",
+		Value: gpu.DefaultRounds,
+		Usage: "GPU rounds per dispatch (1-64); requires --gpu",
 	})
 }
 
 func validateBackend(command *cli.Command) error {
 	if command.String("gpu") == "off" {
+		if command.IsSet("gpu-streams") || command.IsSet("gpu-rounds") {
+			return errors.New("--gpu-streams and --gpu-rounds require an enabled --gpu")
+		}
+
 		return nil
 	}
 
-	_, err := gpuIndex(command.String("gpu"))
+	_, err := gpuOptions(command)
 	if err != nil {
 		return err
 	}
@@ -79,7 +91,7 @@ func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matc
 		return search.RunQueued(ctx, matcher, save, options)
 	}
 
-	index, err := gpuIndex(command.String("gpu"))
+	deviceOptions, err := gpuOptions(command)
 	if err != nil {
 		return search.Stats{}, err
 	}
@@ -129,9 +141,13 @@ func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matc
 	}
 
 	go func() {
-		gpuOptions := gpu.Options{Device: index, Monitor: options.Monitor}
+		deviceOptions.Monitor = options.Monitor
 
-		stats, metrics, runError := gpu.Run(workCtx, plan, matcher, serializedSave, gpuOptions)
+		deviceOptions.Ready = func(device string) {
+			fmt.Fprintf(command.ErrWriter, "GPU %s: %d streams, %d rounds.\n", device, deviceOptions.Streams, deviceOptions.Rounds)
+		}
+
+		stats, metrics, runError := gpu.Run(workCtx, plan, matcher, serializedSave, deviceOptions)
 		options.Monitor.Stop()
 
 		callbacks.Lock()
@@ -165,6 +181,25 @@ func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matc
 	}
 
 	return total, runError
+}
+
+func gpuOptions(command *cli.Command) (gpu.Options, error) {
+	index, err := gpuIndex(command.String("gpu"))
+	if err != nil {
+		return gpu.Options{}, err
+	}
+
+	streams := command.Int("gpu-streams")
+	if streams < 1 || streams > gpu.MaxStreams {
+		return gpu.Options{}, fmt.Errorf("invalid --gpu-streams %d: expected 1-%d", streams, gpu.MaxStreams)
+	}
+
+	rounds := command.Int("gpu-rounds")
+	if rounds < 1 || rounds > gpu.MaxRounds {
+		return gpu.Options{}, fmt.Errorf("invalid --gpu-rounds %d: expected 1-%d", rounds, gpu.MaxRounds)
+	}
+
+	return gpu.Options{Device: index, Streams: streams, Rounds: rounds}, nil
 }
 
 func gpuIndex(value string) (int, error) {

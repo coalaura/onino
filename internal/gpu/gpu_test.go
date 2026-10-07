@@ -347,34 +347,54 @@ func TestCancellationDrainsOverflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	monitor := search.NewMonitor()
-
-	stats, _, err := Run(ctx, Plan{count: 1}, matcher, func(key onion.Key, found time.Time) error {
-		live := monitor.Snapshot()
-		if live.Checked != 8 || live.Saved >= live.Checked {
-			t.Errorf("snapshot counts uncompleted work or unsaved matches: %+v", live)
-		}
-
-		cancel()
-
-		return nil
-	}, Options{Device: testDevice(t), Validation: true, Streams: 8, Capacity: 1, Monitor: monitor})
-
-	if !errors.Is(err, context.Canceled) || stats.Checked != 8 || stats.Saved != 8 {
-		t.Fatalf("lost pending matches on cancellation: %+v, %v", stats, err)
+	settings := []Options{
+		{Device: testDevice(t), Validation: true, Streams: 8, Capacity: 1},
+		{Device: testDevice(t), Validation: true, Streams: 4096, Rounds: 2},
 	}
 
-	if monitor.Snapshot() != stats {
-		t.Fatal("monitor lost completed dispatches or drained saves")
-	}
+	for _, options := range settings {
+		t.Run(strconv.Itoa(options.Streams), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
-	select {
-	case <-monitor.Done():
-	default:
-		t.Fatal("GPU shutdown did not stop reporting")
+			monitor := search.NewMonitor()
+			options.Monitor = monitor
+
+			readyCount := 0
+
+			options.Ready = func(device string) {
+				readyCount++
+
+				if device == "" || monitor.Snapshot() != (search.Stats{}) {
+					t.Error("startup did not precede completed work on a selected device")
+				}
+			}
+
+			stats, _, runError := Run(ctx, Plan{count: 1}, matcher, func(key onion.Key, found time.Time) error {
+				live := monitor.Snapshot()
+				if live.Checked != uint64(options.Streams) || live.Saved >= live.Checked {
+					t.Errorf("snapshot counts uncompleted work or unsaved matches: %+v", live)
+				}
+
+				cancel()
+
+				return nil
+			}, options)
+
+			if !errors.Is(runError, context.Canceled) || stats.Checked != uint64(options.Streams) || stats.Saved != stats.Checked {
+				t.Fatalf("lost pending matches on cancellation: %+v, %v", stats, runError)
+			}
+
+			if readyCount != 1 || monitor.Snapshot() != stats {
+				t.Fatal("missing startup notification or completed dispatches/drained saves")
+			}
+
+			select {
+			case <-monitor.Done():
+			default:
+				t.Fatal("GPU shutdown did not stop reporting")
+			}
+		})
 	}
 }
 

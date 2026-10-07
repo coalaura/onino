@@ -19,11 +19,6 @@ import (
 	"unsafe"
 )
 
-const (
-	defaultStreams = 256
-	defaultRounds  = 4
-)
-
 type command struct {
 	Center     [30]uint32
 	Expected   uint32

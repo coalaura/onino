@@ -128,4 +128,8 @@ func checkProgressIntegration(t *testing.T, flags []string, pinned bool) {
 	if pinned && !strings.Contains(text, "1 worker(s), pinning physical cores first") {
 		t.Fatal("mixed check requires exactly one pinned CPU search worker")
 	}
+
+	if command.String("gpu") == "auto" && strings.Count(text, "4096 streams, 2 rounds.") != 1 {
+		t.Fatal("expected selected GPU configuration exactly once at startup")
+	}
 }

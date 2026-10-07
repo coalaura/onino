@@ -14,6 +14,13 @@ import (
 	"github.com/coalaura/onino/internal/search"
 )
 
+const (
+	DefaultStreams = 256
+	DefaultRounds  = 4
+	MaxStreams     = 16384
+	MaxRounds      = 64
+)
+
 type Options struct {
 	Device     int
 	Validation bool
@@ -21,6 +28,8 @@ type Options struct {
 	Rounds     int
 	Capacity   int
 	Monitor    *search.Monitor
+	// Ready runs once after device and seed setup, before the first submission.
+	Ready func(device string)
 }
 
 type Metrics struct {
@@ -119,18 +128,18 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 	}
 
 	if options.Streams == 0 {
-		options.Streams = defaultStreams
+		options.Streams = DefaultStreams
 	}
 
 	if options.Rounds == 0 {
-		options.Rounds = defaultRounds
+		options.Rounds = DefaultRounds
 	}
 
 	if options.Capacity == 0 {
 		options.Capacity = options.Streams
 	}
 
-	if options.Streams < 1 || options.Streams > 16384 || options.Rounds < 1 || options.Rounds > 64 || options.Capacity < 1 || options.Capacity > options.Streams || options.Device < -1 {
+	if options.Streams < 1 || options.Streams > MaxStreams || options.Rounds < 1 || options.Rounds > MaxRounds || options.Capacity < 1 || options.Capacity > options.Streams || options.Device < -1 {
 		return stats, metrics, errors.New("invalid GPU device, stream, round or readback capacity")
 	}
 
@@ -197,6 +206,10 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 
 		verified <- verifyError
 	}()
+
+	if options.Ready != nil {
+		options.Ready(metrics.Device)
+	}
 
 	started := time.Now()
 
