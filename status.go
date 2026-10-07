@@ -31,7 +31,11 @@ func appendSearchStatus(buffer []byte, stats search.Stats, elapsed time.Duration
 
 	buffer = appendGroupedDigits(buffer, number)
 
-	buffer = append(buffer, " keys/s avg)"...)
+	if final {
+		buffer = append(buffer, " keys/s overall avg)"...)
+	} else {
+		buffer = append(buffer, " keys/s recent)"...)
+	}
 
 	if !final {
 		buffer = append(buffer, "; est. wait from now: 50% "...)

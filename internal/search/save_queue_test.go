@@ -46,8 +46,11 @@ func TestQueuedBackpressureAndDrain(t *testing.T) {
 
 				var active atomic.Int32
 
+				monitor := NewMonitor()
+
 				options := Options{
 					Workers: 1,
+					Monitor: monitor,
 					Progress: func(stats Stats) {
 						if active.Add(1) != 1 || stats.Saved > stats.Checked {
 							t.Error("overlapping callbacks or inconsistent counters")
@@ -90,6 +93,10 @@ func TestQueuedBackpressureAndDrain(t *testing.T) {
 					t.Fatal("worker did not fill the bounded queue while saving was blocked")
 				}
 
+				if monitor.Snapshot() != (Stats{Checked: saveQueueCapacity + 2}) {
+					t.Fatal("monitor did not sample live counters while the saver was blocked")
+				}
+
 				// The blocked match's timestamp must also precede the queue delay.
 				time.Sleep(time.Second)
 
@@ -101,6 +108,16 @@ func TestQueuedBackpressureAndDrain(t *testing.T) {
 				result := <-done
 				if !errors.Is(result.err, context.Canceled) || result.stats != (Stats{Checked: batchSize, Saved: batchSize}) || len(keys) != batchSize {
 					t.Fatalf("queue did not drain the current batch: %+v, keys=%d", result, len(keys))
+				}
+
+				if monitor.Snapshot() != result.stats {
+					t.Fatal("monitor lost final worker publication or drained saves")
+				}
+
+				select {
+				case <-monitor.Done():
+				default:
+					t.Fatal("backend did not stop reporting")
 				}
 
 				nonces := make(map[[32]byte]bool, len(keys))

@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCPUFlag(t *testing.T) {
@@ -74,5 +76,56 @@ func TestSIMDFlag(t *testing.T) {
 		if (err == nil) != valid {
 			t.Fatalf("--simd %q: %v", value, err)
 		}
+	}
+}
+
+func TestCPUProgressIntegration(t *testing.T) {
+	checkProgressIntegration(t, []string{"--cpu", "1"}, false)
+}
+
+func checkProgressIntegration(t *testing.T, flags []string, pinned bool) {
+	t.Helper()
+
+	if os.Getenv("ONINO_PROGRESS_TEST") != "1" {
+		t.Skip("set ONINO_PROGRESS_TEST=1 for timed CLI progress checks")
+	}
+
+	previous := runtime.GOMAXPROCS(0)
+	defer runtime.GOMAXPROCS(previous)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	timer := time.AfterFunc(13*time.Second, cancel)
+	defer timer.Stop()
+
+	var output bytes.Buffer
+
+	command := newCommand()
+	command.Writer = &output
+	command.ErrWriter = &output
+
+	arguments := []string{"onino", "--output", t.TempDir()}
+	arguments = append(arguments, flags...)
+	arguments = append(arguments, "somethingrare.")
+
+	err := command.Run(ctx, arguments)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	text := output.String()
+	t.Log(text)
+
+	if strings.Count(text, "keys/s recent") != 3 || strings.Count(text, "keys/s overall avg") != 1 {
+		t.Fatal("expected three shared periodic reports and one final summary")
+	}
+
+	if strings.Contains(text, "NaN") || strings.Contains(text, "+Inf") || strings.Contains(text, "Checked 0 keys, saved") {
+		t.Fatal("invalid throughput or missing completed work")
+	}
+
+	if pinned && !strings.Contains(text, "1 worker(s), pinning physical cores first") {
+		t.Fatal("mixed check requires exactly one pinned CPU search worker")
 	}
 }

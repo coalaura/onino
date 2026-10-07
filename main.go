@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -129,17 +130,15 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 	started := time.Now()
 	lastMatch := started
 
-	progress := func(stats search.Stats) {
-		elapsed := time.Since(started)
-		rate := float64(stats.Checked) / elapsed.Seconds()
+	var outputMutex sync.Mutex
 
-		// Reuse the line buffer so periodic reporting does not allocate.
-		line := appendSearchStatus(progressBuffer[:0], stats, elapsed.Truncate(time.Second), rate, estimate, false)
+	command.Writer = serializedWriter{writer: command.Writer, mutex: &outputMutex}
+	command.ErrWriter = serializedWriter{writer: command.ErrWriter, mutex: &outputMutex}
 
-		command.ErrWriter.Write(line)
-	}
+	monitor := search.NewMonitor()
+	reporter := startProgress(ctx, command.ErrWriter, estimate, monitor, started)
 
-	options := search.Options{Workers: workers, CPUs: processors, Progress: progress, SIMD: mode}
+	options := search.Options{Workers: workers, CPUs: processors, Monitor: monitor, SIMD: mode}
 
 	stats, err := runBackend(ctx, command, matcher, func(key onion.Key, found time.Time) error {
 		saveError := store.Save(key)
@@ -160,12 +159,7 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		return nil
 	}, options)
 
-	elapsed := time.Since(started)
-	rate := float64(stats.Checked) / elapsed.Seconds()
-
-	line := appendSearchStatus(progressBuffer[:0], stats, elapsed.Round(time.Millisecond), rate, estimate, true)
-
-	command.ErrWriter.Write(line)
+	reporter.finish(stats)
 
 	if errors.Is(err, context.Canceled) {
 		return nil

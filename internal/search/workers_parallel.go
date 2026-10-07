@@ -21,10 +21,12 @@ const publishBatches = 128
 // placement to the OS; otherwise it must contain one distinct CPU per worker.
 // Progress and save callbacks are serialized and never overlap. Callbacks must
 // return for shutdown to complete; cancellation does not interrupt a save.
+// Monitor exposes published counters for an external reporting coordinator.
 type Options struct {
 	Workers  int
 	CPUs     []cpu.CPU
 	Progress func(Stats)
+	Monitor  *Monitor
 	SIMD     simd.Mode
 }
 
@@ -90,6 +92,7 @@ func (run *parallelRun) fail(err error) {
 
 	run.err = errors.Join(run.err, err)
 	run.stopped.Store(true)
+	run.options.Monitor.Stop()
 }
 
 func (run *parallelRun) saveKey(key onion.Key) error {
@@ -177,8 +180,8 @@ func (run *parallelRun) work(index int) {
 	}
 }
 
-// RunWithOptions preserves the direct single-worker path when placement is not
-// requested. It does not change GOMAXPROCS; the application owns that decision.
+// RunWithOptions preserves the direct single-worker path when neither placement
+// nor monitoring is requested. The application owns GOMAXPROCS.
 func RunWithOptions(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, options Options) (Stats, error) {
 	if matcher == nil || save == nil {
 		return Stats{}, errors.New("search requires a matcher and a save function")
@@ -189,7 +192,7 @@ func RunWithOptions(ctx context.Context, matcher *pattern.Matcher, save SaveFunc
 		return Stats{}, err
 	}
 
-	if options.Workers == 1 && len(options.CPUs) == 0 {
+	if options.Workers == 1 && len(options.CPUs) == 0 && options.Monitor == nil {
 		return runWithSIMD(ctx, matcher, save, options.Progress, options.SIMD)
 	}
 
@@ -209,6 +212,8 @@ func runParallel(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, o
 }
 
 func runWorkers(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, options Options, hooks parallelHooks, queue *saveQueue) (Stats, error) {
+	defer options.Monitor.Stop()
+
 	run := parallelRun{
 		ctx:     ctx,
 		matcher: matcher,
@@ -219,6 +224,8 @@ func runWorkers(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, op
 		done:    make(chan struct{}, options.Workers),
 		queue:   queue,
 	}
+
+	options.Monitor.Observe(run.totals)
 
 	var ticks <-chan time.Time
 
@@ -240,6 +247,7 @@ func runWorkers(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, op
 	for remaining := options.Workers; remaining > 0; {
 		select {
 		case <-run.done:
+			options.Monitor.Stop()
 			remaining--
 		case <-ticks:
 			// A blocked save must not trap the coordinator on a mutex. A

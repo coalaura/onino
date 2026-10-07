@@ -16,6 +16,7 @@ import (
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/search"
 )
 
 var (
@@ -349,14 +350,31 @@ func TestCancellationDrainsOverflow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	monitor := search.NewMonitor()
+
 	stats, _, err := Run(ctx, Plan{count: 1}, matcher, func(key onion.Key, found time.Time) error {
+		live := monitor.Snapshot()
+		if live.Checked != 8 || live.Saved >= live.Checked {
+			t.Errorf("snapshot counts uncompleted work or unsaved matches: %+v", live)
+		}
+
 		cancel()
 
 		return nil
-	}, Options{Device: testDevice(t), Validation: true, Streams: 8, Capacity: 1})
+	}, Options{Device: testDevice(t), Validation: true, Streams: 8, Capacity: 1, Monitor: monitor})
 
 	if !errors.Is(err, context.Canceled) || stats.Checked != 8 || stats.Saved != 8 {
 		t.Fatalf("lost pending matches on cancellation: %+v, %v", stats, err)
+	}
+
+	if monitor.Snapshot() != stats {
+		t.Fatal("monitor lost completed dispatches or drained saves")
+	}
+
+	select {
+	case <-monitor.Done():
+	default:
+		t.Fatal("GPU shutdown did not stop reporting")
 	}
 }
 

@@ -20,7 +20,7 @@ type Options struct {
 	Streams    int
 	Rounds     int
 	Capacity   int
-	Progress   func(search.Stats)
+	Monitor    *search.Monitor
 }
 
 type Metrics struct {
@@ -106,9 +106,12 @@ func (worker *verifier) verify(candidate discovered) (feedback, error) {
 
 // Run keeps at most two bounded dispatches in flight. Verification and persistence run on a separate goroutine; ordinary cancellation drains accepted hits and persistent overflow before returning.
 func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.SaveMatchFunc, options Options) (search.Stats, Metrics, error) {
+	defer options.Monitor.Stop()
+
 	var (
 		stats   search.Stats
 		metrics Metrics
+		checked atomic.Uint64
 	)
 
 	if matcher == nil || save == nil || plan.count == 0 {
@@ -148,6 +151,13 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 	metrics.Device = engine.name
 
 	worker := verifier{seeds: make([]seed, options.Streams), matcher: matcher, save: save}
+
+	options.Monitor.Observe(func() search.Stats {
+		saved := worker.saved.Load()
+
+		return search.Stats{Checked: checked.Load(), Saved: saved}
+	})
+
 	commands := make([]command, options.Streams)
 
 	for index := range worker.seeds {
@@ -176,6 +186,7 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 
 			reply, verifyError = worker.verify(candidate)
 			if verifyError != nil {
+				options.Monitor.Stop()
 				cancel()
 
 				continue
@@ -188,7 +199,6 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 	}()
 
 	started := time.Now()
-	lastProgress := started
 
 	var (
 		inFlight    int
@@ -199,6 +209,10 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 
 	for {
 		stopping := workCtx.Err() != nil
+		if stopping {
+			options.Monitor.Stop()
+		}
+
 		if inFlight < 2 && !stopping {
 			drainRefills(refills, commands)
 
@@ -248,6 +262,7 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 		pending = completed.pending
 
 		stats.Checked += uint64(completed.checked)
+		checked.Store(stats.Checked)
 
 		metrics.Execution += completed.elapsed
 		metrics.Gaps += completed.gap
@@ -258,14 +273,9 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 		for _, result := range completed.hits {
 			candidates <- discovered{hit: result, found: found}
 		}
-
-		if options.Progress != nil && found.Sub(lastProgress) >= time.Second {
-			stats.Saved = worker.saved.Load()
-			options.Progress(stats)
-			lastProgress = found
-		}
 	}
 
+	options.Monitor.Stop()
 	close(candidates)
 
 	verifyError := <-verified

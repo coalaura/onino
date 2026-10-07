@@ -93,9 +93,8 @@ func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matc
 	defer cancel()
 
 	var (
-		callbacks     sync.Mutex
-		progressStats [2]search.Stats
-		saveError     error
+		callbacks sync.Mutex
+		saveError error
 	)
 
 	serializedSave := func(key onion.Key, found time.Time) error {
@@ -108,23 +107,11 @@ func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matc
 
 		saveError = save(key, found)
 		if saveError != nil {
+			options.Monitor.Stop()
 			cancel()
 		}
 
 		return saveError
-	}
-
-	progress := options.Progress
-
-	report := func(index int, stats search.Stats) {
-		callbacks.Lock()
-		defer callbacks.Unlock()
-
-		progressStats[index] = stats
-
-		if progress != nil {
-			progress(sumStats(progressStats[0], progressStats[1]))
-		}
 	}
 
 	results := make(chan backendResult, 2)
@@ -133,27 +120,19 @@ func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matc
 	if options.Workers > 0 {
 		backends++
 
-		options.Progress = func(stats search.Stats) {
-			report(0, stats)
-		}
-
 		go func() {
 			stats, runError := search.RunQueued(workCtx, matcher, serializedSave, options)
-			report(0, stats)
+			options.Monitor.Stop()
 			results <- backendResult{stats: stats, err: runError}
 			cancel()
 		}()
 	}
 
 	go func() {
-		gpuProgress := func(stats search.Stats) {
-			report(1, stats)
-		}
-
-		gpuOptions := gpu.Options{Device: index, Progress: gpuProgress}
+		gpuOptions := gpu.Options{Device: index, Monitor: options.Monitor}
 
 		stats, metrics, runError := gpu.Run(workCtx, plan, matcher, serializedSave, gpuOptions)
-		report(1, stats)
+		options.Monitor.Stop()
 
 		callbacks.Lock()
 

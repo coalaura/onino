@@ -35,7 +35,7 @@ func appendCandidateEstimate(buffer []byte, estimate matchEstimate) []byte {
 	buffer = append(buffer, "; 95% ~"...)
 	buffer = appendCandidateCount(buffer, estimate.candidates95)
 
-	return append(buffer, ". Wait estimates use the overall average rate.\n"...)
+	return append(buffer, ". Wait estimates use the recent combined rate.\n"...)
 }
 
 func appendCandidateCount(buffer []byte, count float64) []byte {

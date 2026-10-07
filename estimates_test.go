@@ -50,17 +50,17 @@ func TestEstimateStatus(t *testing.T) {
 	var buffer [320]byte
 
 	startup := string(appendCandidateEstimate(buffer[:0], estimate))
-	if !strings.Contains(startup, "50% ~23,816,355,775") || !strings.Contains(startup, "; 95% ~102,932,577,139") {
+	if !strings.Contains(startup, "50% ~23,816,355,775") || !strings.Contains(startup, "; 95% ~102,932,577,139") || !strings.Contains(startup, "recent combined rate") {
 		t.Fatalf("unexpected startup estimate: %s", startup)
 	}
 
 	line := string(appendSearchStatus(buffer[:0], stats, 40*time.Second, 25000000, estimate, false))
-	if !strings.Contains(line, "25,000,000 keys/s avg") || !strings.Contains(line, "50% 15m53s, 95% 1h8m38s") {
+	if !strings.Contains(line, "25,000,000 keys/s recent") || !strings.Contains(line, "50% 15m53s, 95% 1h8m38s") {
 		t.Fatalf("unexpected progress: %s", line)
 	}
 
 	// Already checked candidates and previous saves do not shorten the next
-	// independent wait. The estimate changes only with the average rate.
+	// independent wait. The estimate changes only with the recent rate.
 	stats.Checked *= 10
 	stats.Saved = 100
 
@@ -79,7 +79,7 @@ func TestEstimateStatus(t *testing.T) {
 	}
 
 	final := string(appendSearchStatus(buffer[:0], stats, time.Minute, 100, estimate, true))
-	if strings.Contains(final, "wait") || !strings.Contains(final, "saved 100 matches") {
+	if strings.Contains(final, "wait") || !strings.Contains(final, "saved 100 matches") || !strings.Contains(final, "100 keys/s overall avg") {
 		t.Fatal(final)
 	}
 }
