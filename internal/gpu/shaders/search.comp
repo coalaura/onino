@@ -76,7 +76,15 @@ void main() {
 			if (lane < size) { products[size + lane] = mul(products[2 * (size + lane)], products[2 * (size + lane) + 1]); }
 			barrier();
 		}
-		if (lane == 0) { products[1] = inverse(products[1]); }
+		if (lane == 0) {
+			Field product = products[1];
+			Field mixedJump = mul(stream.center.xy, offsets[64].xy);
+			Field denominatorJump = sub(small(1), square(mixedJump));
+			Field combined = inverse(mul(product, denominatorJump));
+			products[1] = mul(denominatorJump, combined);
+			// Node zero is outside the product tree. Paused ranges recompute it on resume.
+			products[0] = mul(product, combined);
+		}
 		barrier();
 		for (uint size = 1; size < 64; size <<= 1) {
 			if (lane < size) {
@@ -125,7 +133,7 @@ void main() {
 			} else {
 				Affine jump = offsets[64];
 				Field mixedJump = mul(stream.center.xy, jump.xy);
-				Field reciprocalJump = inverse(sub(small(1), square(mixedJump)));
+				Field reciprocalJump = products[0];
 				Field factorJump = mul(mixedJump, reciprocalJump);
 				Field numeratorX = add(mul(stream.center.x, jump.y), mul(stream.center.y, jump.x));
 				Field numeratorY = add(mul(stream.center.y, jump.y), mul(stream.center.x, jump.x));

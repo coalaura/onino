@@ -15,9 +15,22 @@ void main() {
 		case 1: result = sub(command.first, command.second); break;
 		case 2: result = mul(command.first, command.second); break;
 		case 3: result = square(command.first); break;
+		case 5: result = squares(command.first, 254); break;
+		case 6:
+			result = command.first;
+			for (uint depth = 0; depth < 6; depth++) { result = mul(result, result); }
+			break;
+		case 7: result = mul(sub(command.first, command.second), add(command.first, command.second)); break;
 		default: result = inverse(command.first); break;
 	}
+	uint boundFailures = 0;
+	uint boundFactor = command.operation == 0 ? 2u : (command.operation == 1 ? 3u : 1u);
+	for (uint limb = 0; limb < 10; limb++) { boundFailures |= uint(result.limb[limb] >= boundFactor * (1u << width(limb))); }
+	if (command.operation <= 1) { result = normalize(result); }
+	for (uint limb = 0; limb < 10; limb++) { boundFailures |= uint(result.limb[limb] > mask(limb)); }
 	result = canonical(result);
 	for (uint limb = 0; limb < 10; limb++) { words[index * 12 + limb] = result.limb[limb]; }
+	words[index * 12 + 10] = boundFailures;
+	words[index * 12 + 11] = 0;
 	if (index == 0) { count = gl_NumWorkGroups.x * 2; }
 }
