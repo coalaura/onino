@@ -1,295 +1,274 @@
-# Resident Vulkan Prefix Search for onino
+# Resident Vulkan Search and Bounded Automatic Configuration
 
 ## Abstract
 
-This paper describes onino's resident Vulkan prefix-search backend and its measured optimization on the RTX 5090. Public elliptic-curve centers, offset tables, candidate positions and prefix filters remain on the device; only new public centers and compact potential-match records cross the host boundary. Private key material remains on the host, where each potential match is independently reconstructed and verified before persistence. GPU streams and CPU search workers advance independently.
+onino combines independent CPU search workers with a resident Vulkan prefix-search engine. This study optimizes complete search, including submission, accounting, verification, persistence and cancellation, rather than isolated field arithmetic. It replaces repeated full command uploads and command-buffer recording with dirty updates and reusable submissions, moves result allocation to device-local memory, bounds readback and separates preparation, packed root inversion and reconstruction into GPU-resident passes. Automatic configuration searches a small stream/round neighborhood while the requested CPU workers perform useful search. Calibration preserves matches, generations and completed counts.
 
-On an NVIDIA RTX 5090 with a Ryzen 9 9950X3D host, sharing the candidate and center-jump inversion and introducing bounded operation-specific carries raise rare-prefix throughput from 168.97 to 271.95 million logically checked candidates per second at identical production dispatch settings. Ten alternating baseline/candidate pairs after sustained warm-up show a 60.9% median paired improvement. Three-prefix and 51-character-prefix workloads gain similarly; frequent-hit throughput remains approximately 1.64 million candidates per second. With exactly one pinned CPU worker, rare-prefix combined throughput rises from 232.89 to 330.19 million candidates per second. Fixed-index expansion and an explicit high/low 32-bit prototype lose complete-search performance and are not retained. A bounded dispatch sweep identifies further rare-prefix gains but also a frequent-hit and cancellation tradeoff, so the default remains 256 streams and four rounds.
+On a Ryzen 9 9950X3D and RTX 5090, ten alternating comparisons measure **4.044 billion combined keys/s in automatic mode versus 4.099 billion for the best manually tested configuration**. GPU-only automatic mode measures 2.717 billion versus 2.786 billion keys/s manually. The respective gaps are 1.34% and 2.49%: inside the tuner's 2.5% practical indifference band, but not statistically indistinguishable in these repeated measurements. Warm initial selection takes approximately 4.4 seconds GPU-only and 5.1-5.5 seconds with all CPU workers; useful GPU work starts much earlier. These are bounded-search results on one device, not a global-optimum or universal deadline guarantee.
 
-## 1. Motivation and scope
+The most important shader change is packing independent inversions into adjacent invocations instead of leaving one active lane per stream during inversion. At identical 16,384-stream/four-round settings, complete GPU search rises from 788 to 2,788 million keys/s. Persistent scratch and extra GPU passes are included in that comparison. Ordinary no-hit submissions upload no commands, copy back 6,160 bounded bytes and allocate no Go memory on the tested submit/collect path. GPU drainage is short in rare-prefix runs, but occasional uninterruptible driver destruction calls take over a second. Frequent matches can legitimately take longer to save after submission stops.
 
-The CPU engine described in RESEARCH.md already amortizes expensive curve operations over paired affine candidates. Moving isolated multiplications or individual candidate encodings to an accelerator would retain much of the host orchestration cost while introducing transfers and synchronization at precisely the wrong granularity. A useful first GPU backend must instead own a substantial, independently advancing search interval.
+## 1. Objective and experimental scope
 
-The objective here is correctness and measurable additional throughput alongside one CPU worker. The implementation uses one selected Vulkan device and one compute queue, with no vendor-specific shader instructions. Vulkan 1.3, shader 64-bit integer arithmetic, compute timestamps, suitable storage memory and explicit workgroup limits define the capability floor. This is a deliberately conservative portability contract rather than a claim that every conforming driver has been tested.
+The intended invocation is `onino --cpu all --gpu auto chopperepic.`. `--gpu auto` selects a supported device; omitted `--gpu-streams` and `--gpu-rounds` are calibrated independently. An explicit value fixes that parameter. Both explicit values skip performance exploration while retaining useful-work validation. Ordinary builds remain CGO-free and GPU-enabled builds still default to `--gpu off`.
 
-GPU builds accept one to eight anchored lowercase base32 prefixes of one to 51 characters. Suffix, interior, wildcard and other search plans are rejected explicitly. The restriction excludes the 52nd visible character, whose interpretation reaches beyond the simple prefix portion handled here. Prefixes longer than twelve characters use the same GPU necessary-condition filter and exact host-side matching; they are not truncated semantically.
+The original source for this pass is `a87def5300bd8bd99061bd2f206fd86486ea6446`. Its already-optimized monolithic shader, fixed 256-stream/four-round default and original host path were preserved before modification. The previously reported approximately 637 million GPU-only keys/s at 4096/2 and approximately 1.9 billion combined keys/s at 16384/4 are reproduction targets, not assumed baselines. Fresh real-CLI runs reproduced both. Earlier work had already selected shared tree/jump inversion and bounded carries; those arithmetic changes are retained rather than repeated.
 
-## 2. Mathematical construction
+GPU plans accept one to eight anchored lowercase base32 prefixes of one to 51 characters. Only the first twelve characters participate in the GPU necessary-condition filter; the complete original matcher independently verifies a reported key. Longer prefixes therefore retain their meaning. Overlapping prefixes and duplicate necessary-condition filters must not be counted as independent acceptance probabilities when sizing the workload.
 
-### 2.1 Independent streams and disjoint intervals
+The runtime capability floor is Vulkan 1.3, shader 64-bit integer arithmetic, compute timestamps, 64-invocation workgroups, sufficient shared/storage limits, device-local storage and host-visible staging. Coherent host memory is preferred but not required. Hardware limits constrain allocation and valid dispatches; they do not identify the fastest configuration. Runtime performance and validation in this study are limited to Windows/NVIDIA. Cross-compilation is a separate compatibility check.
 
-Each stream starts from independent cryptographic entropy. The host expands and clamps an Ed25519 secret scalar, retains its private scalar and nonce material and uploads only an affine public center. Let the initial scalar be \(s\), let \(B\) be the Ed25519 base point and measure offsets in units of \(8B\). The initial center is \((s+8\cdot64)B\). Sixty-four lanes use offsets \(Q_j=8jB\), for \(1\leq j\leq64\) and evaluate both the positive and negative candidate around the center.
+## 2. Mathematical and counting invariants
 
-For a center at step \(k\), this covers steps \(k-64\) through \(k+64\), excluding \(k\) itself. Advancing the center by \(129\cdot8B\) makes successive intervals disjoint. There is no need to coordinate scalar ranges with CPU workers because their seeds are independent. The intentionally skipped center is a small, fixed coverage cost, not a repeated candidate or a gap in the accepted-match protocol.
+### 2.1 Independent streams and candidate order
 
-Within a range, logical candidate order is lane zero's positive candidate, its negative sibling, then the corresponding pair from each successive lane. A resident cursor identifies the first candidate not yet accounted for. This ordering matters when a necessary-condition match fails complete host verification: resuming at the next logical position preserves the sibling and all later candidates without recounting earlier work.
+Each stream starts from independent cryptographic entropy. The host expands and clamps an Ed25519 secret scalar, retains private scalar and nonce material and uploads only an affine public center. If the scalar is \(s\), the initial center is \((s+8\cdot64)B\). Sixty-four lanes use offsets \(Q_j=8jB\), \(1\leq j\leq64\), evaluating both signs around that center. A center at step \(k\) covers \(k-64\) through \(k+64\), excluding \(k\); advancing by \(129\cdot8B\) gives disjoint successive intervals. CPU workers have independent seeds.
 
-The host reserves the entire 32-bit step budget before accepting a seed, rejecting a starting scalar if the largest permitted increment could cross the scalar's high-bit boundary. The device requests a replacement before range advancement could overflow that budget. Generation numbers distinguish successive seeds occupying the same stream slot.
+Logical order is lane zero's positive candidate, its negative sibling, then the pair from each successive lane. A resident cursor records the first unconsumed logical position. A potential match pauses the stream without advancing its center. If full host verification rejects the necessary-condition match, the acknowledgement resumes at the next cursor position. Recomputed arithmetic is not recounted. A successfully exported key retires that seed, preserving the existing one-export-per-seed guarantee.
 
-### 2.2 Paired affine generation
+The host reserves the entire 32-bit step budget before accepting a seed, rejecting a starting scalar that could cross the permitted scalar boundary. The shader requests replacement before advancement would overflow. Generation checks prevent stale acknowledgements or results from affecting a replacement seed.
 
-Work is performed over \(\mathbb F_p\), where \(p=2^{255}-19\), on the twisted Edwards curve with \(d=-121665/121666\). For affine center \(C\) and offset \(Q\), define
+### 2.2 Paired affine generation and shared inversion
 
-\[
-a=x_Cx_Q,\qquad b=y_Cy_Q,\qquad c=d\,x_Cy_Cx_Qy_Q.
-\]
-
-The paired ordinates are
+Work is over \(\mathbb F_p\), \(p=2^{255}-19\), with Edwards parameter \(d=-121665/121666\). For center \(C\) and offset \(Q\), define \(a=x_Cx_Q\), \(b=y_Cy_Q\) and \(c=d x_Cy_Cx_Qy_Q\). The paired ordinates are
 
 \[
 y_+=\frac{b+a}{1-c},\qquad y_-=\frac{b-a}{1+c}.
 \]
 
-One reciprocal serves both candidates. With \(r=(1-c^2)^{-1}\) and \(t=cr\), the two inverse factors are \(r+t=(1-c)^{-1}\) and \(r-t=(1+c)^{-1}\). The offset table stores the factor involving \(d\), while each resident center stores its ordinary \(xy\) product. The complete Edwards addition law on these valid points avoids exceptional denominators.
-
-The sixty-four denominators in a workgroup are inverted together. A shared-memory product tree performs 63 upward multiplications and 126 downward multiplications. Let its root product be \(P\) and let \(J=1-c_{\mathrm{jump}}^2\) be the analogous denominator for center advancement. Instead of independently inverting the root and jump denominator, lane zero computes
+One reciprocal serves both candidates: if \(r=(1-c^2)^{-1}\) and \(t=cr\), then \(r+t=(1-c)^{-1}\) and \(r-t=(1+c)^{-1}\). A 64-leaf product tree needs 63 upward and 126 downward multiplications. If its root is \(P\) and the center-jump denominator is \(J\), one inversion recovers both reciprocals:
 
 \[
 u=(PJ)^{-1},\qquad P^{-1}=Ju,\qquad J^{-1}=Pu.
 \]
 
-The recovered root reciprocal feeds the unchanged downward tree. Its otherwise unused node zero holds the jump reciprocal until advancement. This replaces one inversion with three multiplications, retaining the product-tree layout and synchronization. Center advancement uses the same affine identities with the fixed jump point, including the abscissa needed to form the next center. A hit pauses the stream without advancing; resumption recomputes intermediates for that same center and starts accounting at the saved cursor. No reciprocal persists across a center or generation change. The complete addition law makes both the candidate and jump denominators nonzero for the valid points used here.
+The downward tree recovers candidate reciprocals; otherwise unused node zero retains the jump reciprocal for center advancement. The complete Edwards addition law makes these denominators nonzero for the valid points used here. Reciprocals are not reused across a changed center or generation.
 
-### 2.3 Field representation and canonical filtering
+### 2.3 Field bounds and canonical filtering
 
-Field elements use ten unsigned limbs with alternating 26- and 25-bit widths. Multiplication retains schoolbook accumulation in 64-bit integers, including the radix-alignment factors and reduction by \(2^{255}\equiv19\pmod p\). Squaring retains its dedicated symmetric implementation. A fixed addition chain computes inversion with 254 squarings and eleven multiplications. The useful reduction change is to carry only as much as each operation and its consumers require, rather than immediately normalizing every addition and subtraction.
+Field elements use ten unsigned limbs of alternating 26- and 25-bit widths. Let \(r_i=2^{26-(i\bmod2)}\). Tight limbs satisfy \(0\leq a_i<r_i\); supported lazy limbs satisfy \(0\leq a_i<3r_i\). Tight representation is not necessarily canonical. Addition of tight inputs stays below \(2r_i\); subtraction adds \(2p\) first and stays nonnegative and below \(3r_i\). Multiplication and dedicated squaring accept lazy inputs and restore tight output. Their largest unreduced accumulator is 5,046,283,313,212,293,387 and incoming carries remain below \(2^{63}\).
 
-Let \(r_i=2^{26-(i\bmod2)}\). A tight field has \(0\leq a_i<r_i\), while a supported lazy field has \(0\leq a_i<3r_i\). Tight does not mean canonical: the represented integer can still be between \(p\) and \(2^{255}-1\). The operation contracts are:
+Reduction uses a 64-bit ripple/top fold, an additional low-limb carry before narrowing and two 32-bit normalization passes. After the first fold limb zero is below \(2^{37}\); carrying it leaves limb one below \(r_1+2048\), so narrowing loses no bits. For general lazy normalization, the first pass leaves only limb zero potentially loose, below \(r_0+57\); a second wrap can occur only after its low-limb carry, leaving sufficient room for the final addition of nineteen. Arbitrary chains of lazy additions are outside the contract. A fixed inversion chain uses 254 squarings and eleven multiplications.
 
-| Operation | Input bounds | Output bounds and accumulator limit |
-| --- | --- | --- |
-| Addition | Both tight | Each limb is below \(2r_i\); unsigned 32-bit addition suffices. |
-| Subtraction | Both tight | Compute \(a_i+2p_i-b_i\), with \(p_0=r_0-19\), \(p_i=r_i-1\) otherwise. Every limb is nonnegative and below \(3r_i\), without unsigned overflow. |
-| Multiplication | Both below \(3r_i\) | Tight output. The largest unreduced accumulator is 5,046,283,313,212,293,387; all accumulators including incoming carries remain below \(2^{63}\). |
-| Dedicated square | Below \(3r_i\) | Tight output with the same accumulator bound, including doubled off-diagonal terms. |
-| Repeated squares and inverse | Initially below \(3r_i\) | Every square/multiply restores tight bounds. Repetition does not grow the bound. |
-| Product-tree multiplication | Lazy leaves, tight internal results | The first level accepts the lazy subtractions; every subsequent upward or downward product is tight. |
-| Normalization | Below \(3r_i\) | Two 32-bit ripple/fold passes produce tight limbs. |
-| Canonicalization | Tight | Subtract \(p\) at most once; output is in \([0,p)\). |
+Canonicalization precedes every prefix decision. Filtering an equivalent noncanonical representation could cause a false negative that host verification cannot recover. The GPU tests masks over the first 60 encoded bits. Host verification reconstructs the scalar offset with independent Ed25519 scalar-base multiplication, compares the reported 64-bit ordinate fragment, applies the complete matcher and saves only independently valid keys.
 
-The accumulator bound follows by replacing each input limb by \(3r_i-1\) in the nonnegative schoolbook sums, with coefficient two for odd/odd radix alignment and nineteen for wraparound. The original three full 64-bit carry passes are replaced by one 64-bit ripple and top fold, one additional low-limb carry before narrowing and two 32-bit normalization passes. After the first ripple/fold, limb zero is below \(2^{37}\). Carrying it into limb one leaves limb zero tight, limb one below \(r_1+2048\) and every other limb tight; narrowing therefore loses no bits. For the general lazy normalization contract, incoming carries are at most three. The first pass leaves only limb zero potentially loose, below \(r_0+57\). A second top wrap can occur only if the low limb carried, leaving it at most 56 before the final addition of nineteen. Thus the second pass leaves every limb tight without a third pass. All intermediate 32-bit values remain below \(3\cdot2^{26}+3\).
+### 2.4 Exact completed work
 
-Production additions and subtractions consume tight values and feed multiplication or squaring; arbitrary chains of lazy additions are outside the contract. The diagnostic shader normalizes addition/subtraction outputs before canonicalization. Production filtering already consumes tight multiplication results, so it incurs no extra generic normalization.
+A no-hit round accounts for exactly 128 candidates per active stream. Thus **4096/16, 8192/8 and 16384/4 each account for 8,388,608 candidates per submission**, not different amounts of work. With a hit, the increment is `min(winner + 1, 128) - cursor`. Physically computed later candidates are speculative and excluded. Paused streams contribute zero until resumed; collection-only work contributes zero.
 
-Canonicalization precedes every prefix decision. Filtering an equivalent but noncanonical field representation could reject an actual match and host verification cannot recover such false negatives. The GPU compares masks over the first twelve base32 characters, a 60-bit necessary condition contained in the first eight bytes of the encoded ordinate. It therefore does not need each candidate's abscissa or sign bit on the ordinary search path. A diagnostic shader calculates the full compressed point, including sign, for differential tests.
+The retained shader accumulates each stream's completed count across all rounds of the submitted sequence and adds it to the device result counter once, at the last reconstruction pass. Every first preparation resets that submission's accumulator. Counts are published to the host only after fence completion and added exactly once, including calibration and cancellation drainage. Dispatch dimensions are never substituted for observed counts. The maximum supported no-hit sequence, 16384/64, fits the 32-bit device counter at 134,217,728 candidates.
 
-The host reconstructs a reported scalar offset using an independent Ed25519 scalar-base multiplication. It checks the reported 64-bit ordinate fragment, evaluates the complete original matcher on the reconstructed public key and saves only a fully verified result. Longer prefixes and any sign-sensitive part of the complete matcher are resolved here. Normal operation consequently does no host work per rejected GPU candidate.
+## 3. Retained resident execution
 
-## 3. Resident execution and match preservation
+### 3.1 Three passes per round
 
-### 3.1 Ownership and submission
+The monolithic predecessor performs root inversion in lane zero while the other lanes wait. The retained sequence separates:
 
-The implementation is isolated in internal/gpu and selected by small startup adapters. Without the `gpu` build tag, neither CGO nor the Vulkan package nor embedded shaders participate in the build. GPU-enabled executables still default to `--gpu off`, which retains the CPU-only execution path. The CPU implementation packages do not contain GPU coordination code.
+1. **Preparation:** one 64-lane workgroup per stream builds the denominator tree and stores its nodes and jump denominator in device-local scratch.
+2. **Packed inversion:** adjacent invocations invert independent stream roots. The dispatch has `ceil(active streams / 64)` workgroups and bounds its final partial group. It skips paused streams.
+3. **Reconstruction/filtering:** a 64-lane workgroup reloads the tree, reconstructs reciprocals, recomputes the inexpensive numerator intermediates, filters candidates and advances or pauses the stream.
 
-A focused C bridge statically includes pinned volk sources and Vulkan headers. Precompiled SPIR-V is embedded in the executable. Building requires a C compiler but no installed Vulkan SDK; running uses the installed loader and driver. Linux GPU builds use a compatible dynamic libc. The build and shader-generation procedure is specified in internal/gpu/BUILD.md.
+All rounds and passes are recorded into one command buffer with compute-write to compute-read/write barriers between passes. Only the last reconstruction publishes results and the submission's checked count. Publishing after every pass would count persistent overflow repeatedly; synchronization/state-machine tests caught that prototype error before retention. Diagnostic full-point data also persists in scratch when an early-round hit must survive until the last pass.
 
-The bridge owns all asynchronous memory and Vulkan objects. Go inputs are copied synchronously before a CGO call returns; the driver never retains Go memory. Public stream state and offset/filter tables live in device-local buffers. Two reusable slots hold host-coherent command and result buffers, command buffers, fences and timestamp-query positions. The default dispatch has 256 independent workgroups, 64 lanes per workgroup and four range rounds: up to 131,072 logically checked candidates when no stream pauses.
+Scratch contains 128 field elements per stream. The complete stream stride is 5,276 bytes; 16,384 streams allocate 86,441,984 bytes. Numerators and mixed products are recomputed rather than stored: storing three extra 64-field arrays raised the stride to 12,952 bytes and lost complete-search performance. The winning comparison includes scratch traffic, barriers, repeated-round work, counters and host coordination.
 
-Submission and collection are coarse operations. The controller fills both slots, blocks on the oldest fence, consumes its compact output and reuses that slot. Queue-ordered barriers protect shared resident state between dispatches. There is no busy polling or steady-state queue-wide or device-wide wait. A device-wide wait is reserved for destruction and failed initialization. Reused CGO output fields and preallocated Go buffers keep the tested steady-state submit/collect path at zero Go allocations; initialization and successful seed replacement are outside that assertion.
+### 3.2 Buffers, dirty updates and reuse
 
-### 3.2 Pending hits, acknowledgements and generations
+Public centers, generations, cursors, scratch, offset/filter tables, commands, allocation counters and result records are device-local. Two bounded slots retain command buffers, descriptor sets, fences, timestamp positions and mapped upload/readback storage. Go memory is copied synchronously at the C boundary and is never retained by Vulkan. Command buffers are reused when active streams, rounds and collection mode match and no dirty update must be recorded.
 
-A stream finding a potential match records its scalar step, generation and ordinate fragment, then pauses. It can be active, pending delivery or delivered and awaiting acknowledgement. A result record is six 32-bit words: stream index, generation, step, record kind and the two ordinate words. The record kind also permits an exhausted stream to request reseeding.
+New seeds and verification acknowledgements mark a bounded dirty command range. Only that range is copied and cleared; holes inside the range are harmless zero-action commands. Ordinary no-hit submissions copy **zero command bytes**. Acknowledgements for temporarily inactive streams remain dirty until those streams reactivate. Configuration changes drain prior submissions and undelivered overflow before changing the active range; stream state, cursor and generation are retained rather than reset or replayed.
 
-The bounded result array is not the authoritative storage for an undelivered match. If the array is full, the stream keeps its pending record and remains paused. Later dispatches retry publication; delivered records are not published twice. Overflow therefore reduces immediate progress but does not discard matches. Completion fences allow collecting a partially filled array immediately rather than waiting for a target hit count.
+Default result capacity is `min(allocated streams, 256)`. Each submission copies a fixed 16-byte header and that bounded array of 24-byte records to mapped readback in the same command buffer: at the usual capacity this is **6,160 bytes**. A second CPU round trip to discover the record count is unnecessary. Larger arrays did not improve rare-prefix throughput in the repeated ablation. Result compaction is therefore limited to the existing bounded append array, not another scan/size-discovery protocol.
 
-Host verification either resumes the same generation after a false positive or replaces the seed after a verified, successfully saved match. A replacement increments the generation and commands carry the generation they expect to modify. Stale acknowledgements cannot resume a replacement stream. Host-side generation checks reject stale results and the first exported key retires its seed, preserving the one-export-per-seed rule.
+Memory types are selected by properties and actual allocation properties are available with `--gpu-diagnostics`. Host-visible does not imply system memory. On this discrete GPU the selected staging type is host-visible/coherent system-heap memory; device-local buffers use the device heap. On unified-memory devices those properties can overlap. Non-coherent fallback flushes uploads and invalidates readback after fence completion using whole mapped allocations, avoiding atom-alignment mistakes. The same generic path supports such layouts, but it has not been performance-validated on an integrated GPU.
 
-### 3.3 Persistence, cancellation and counters
+### 3.3 Overflow, verification and cancellation
 
-Verification and saving run on a separate goroutine from Vulkan submission. In mixed operation, an adapter serializes CPU and GPU save callbacks and progress callbacks. The first save error is retained, cancels both engines and prevents further persistence attempts. Successful-save counts are distinct from checked-candidate counts.
+A potential match remains in its stream until delivered. A full result array increments pending-overflow accounting and leaves that stream paused; it does not discard the record. Delivered streams await an acknowledgement and cannot publish twice. The verifier checks generation and record integrity independently, resumes false positives and reseeds only after successful save. Verification/save channels are bounded by allocated streams. CPU and GPU save callbacks share the existing serialized persistence adapter.
 
-Ordinary cancellation stops new search submissions, collects in-flight dispatches and performs collection-only dispatches until every resident pending hit has been delivered. It does not acknowledge or resume paused streams while draining. The verifier finishes accepted work before return. This contract covers cancellation while overflow records are waiting; it does not promise recovery after process termination, device loss or a failing persistence callback.
+Cancellation is checked before every useful submission. The controller drains accepted submissions and then performs collection-only submissions until resident overflow is delivered, without applying acknowledgements during drainage. The verifier finishes accepted matches before return. A save failure cancels search and remains an error; device loss, process termination and failed storage cannot promise lossless persistence. Slow successful storage is allowed to delay final shutdown rather than discard accepted keys.
 
-Checked counts refer to unique logical candidates consumed through the first potential match, inclusive or through the end of a range. A SIMD-style dispatch can physically calculate later ordinates before discovering which stream position wins and a resumed range may recompute intermediates. Those speculative calculations are not counted twice. Under the rare-prefix timing workload there are no such pauses, making the count directly comparable to the CPU candidate rate.
+Two submissions are the maximum in flight. The first observation of each trial runs alone; overlap is enabled only when the observed sequence tail leaves room inside a 120 ms flight budget. Normal search reduces an automatic dimension when its observed tail exceeds 60 ms or verification backlog becomes large. Explicit settings are rejected with an explanatory error instead of silently changed. A first validation sequence exceeding 150 ms is rejected. These are conservative engineering policies based on observations, not portable watchdog guarantees: a first driver execution, sudden slowdown or uninterruptible driver call can exceed a prediction. Fence timeouts do not cancel work and the implementation does not pretend otherwise.
 
-## 4. Correctness methodology
+## 4. Automatic selection during useful search
 
-The permanent tests use the production arithmetic and search source, with small diagnostic shader variants where observation requires more information than ordinary compact results expose. Arithmetic vectors compare addition, subtraction, multiplication, squaring and inversion with an independent big-integer model. They include zero, random values and values immediately around the prime, including noncanonical encodings. An additional 1,024-case bounds test covers maximum lazy limbs, each radix boundary, zero/max combinations, 254 repeated squarings, six product-tree-depth self-products and a subtraction/addition product. Its reference sums weighted limbs as integers, rather than bit-packing overlapping lazy limbs. The diagnostic checks the operation-specific output bound before canonicalization and the host checks both tight output limbs and all 32 canonical bytes against the independent reference.
+The ten-second startup budget begins near process entry, before CLI/backend initialization, rather than after device creation. CPU workers start while Vulkan initializes. GPU work begins after the device and a small initial stream set are ready. Output distinguishes first useful GPU submission from final initial selection. Pipeline compilation and other blocking driver calls cannot be interrupted by the tuning deadline.
 
-A complete-range test forces every candidate to become observable and compares 260 consecutive full compressed public keys against independent scalar-base multiplication. It crosses two center transitions and verifies the paired ordering, so candidates normally rejected by the prefix filter are covered. A separate three-prefix test compares both hits and checked counts over 384 candidate positions, testing rejection and filtering rather than just the successful path. Host mask tests cover every supported prefix length.
+The initial automatic probe uses at most 256 streams and one round. Streams grow conservatively by at most a factor of two, subject to measured tail bounds, acceptance/backlog and remaining startup time. Device allocation is bounded by workgroup limits, storage-buffer range and a conservative 1/64 share of the smallest applicable memory heap using an 8,192-byte per-stream allowance. This is a heap-capacity bound, not a query of currently free driver memory. Allocation failure remains an explicit error.
 
-State-machine tests deliberately use result capacity one with several active streams. They check lossless overflow, no duplicate delivery, paused-stream counters, stale acknowledgements, replacement generations and resumption of the paired sibling. An epoch diagnostic starts the step counter near exhaustion to test the control transition without traversing billions of candidates; it does not substitute for a full scalar-arithmetic test at that counter. Host tests reject corrupted records and replayed generations. Cancellation tests drain overflow, propagate save failures and write actual keys through the existing store's independent validity checks.
+Stream count supplies independent work and controls resident state. Rounds separately amortize submission overhead and increase sequence duration. After growth, the small candidate set tests round counts targeting approximately 2, 5, 10 and 20 ms, nearby half/quarter stream counts and established successful 4096/2, 8192/8 and 16384/4 settings when supported. It does not exhaustively cross streams and rounds. No model-name or RTX-specific rule is used.
 
-The eleven GPU-package tests passed on the RTX 5090 under both PACE and stock Go with the Khronos validation layer and synchronization validation enabled. The full GPU-enabled suite passed under both toolchains with `-vet=off`; vetting uses only the custom vet tool. Windows/Linux GPU-tagged checks and Windows/Linux/Darwin ordinary checks passed. CPU-only `CGO_ENABLED=0` builds and tests passed under both toolchains and dependency inspection found no GPU package, CGO source, runtime/cgo or embedded SPIR-V in the ordinary build graph. All four production/diagnostic SPIR-V assets were regenerated with the commands in internal/gpu/BUILD.md, validated with `spirv-val` and reproduced byte for byte on a second generation. Required builds and tests use committed sources and assets, without measurement fixtures. A Linux GPU binary was cross-built with the documented GNU libc target; Linux runtime validation was not performed.
+Short growth probes use approximately 50 ms; comparisons use approximately 300 ms plus bounded drainage. The requested CPU workers remain active. Scores are completed CPU-plus-GPU candidate deltas over identical monotonic wall-clock windows, naturally reducing to GPU throughput with CPU search disabled. GPU publication happens on each completed collection; CPU publication retains its existing batched 128-batch mechanism. Reporting's four-second clock is unrelated to tuning. There is no per-candidate synchronization or extra readback for reporting.
 
-An earlier AMD integrated Radeon portability probe passed arithmetic but exited during ordinary and diagnostic search initialization before reporting an opened device. Its cause remains unresolved and the optimized shader has not received cross-vendor runtime validation. Vendor-neutral source and successful cross-compilation do not establish runtime portability.
+The two leading configurations receive a return-to-runner, repeat-winner, return-to-runner comparison. The required improvement is at least 2.5%, increased by observed before/after drift. Effective ties favor substantially shorter tails and then fewer streams. Exploration reserves time for repetitions and transition; if initialization or growth consumes that budget, the best validated probe is retained, not simply the last attempted size. No tuning cache is required.
 
-## 5. Performance methodology
+Filter acceptance is the union of actual GPU masks: covered/duplicate prefixes are removed and long prefixes use the twelve-character GPU limit for this estimate. Frequent acceptance forces automatic rounds to one; observed hits, checked counts and verification backlog constrain growth. A paused dispatch is not evidence that all requested rounds fit: tail extrapolation conservatively allows for the work hidden by early pauses. During useful search, slow execution or growing backlog can reduce automatic rounds and then streams without changing the CPU worker count.
 
-### 5.1 Baseline and controls
+Each trial is real search using the same device, pipeline, allocations and resident states. Completed calibration counts remain in final totals, matches are processed immediately and retained cursors prevent replay. `--gpu-streams` or `--gpu-rounds` fixes only that dimension. Both fixed values still undergo conservative round validation, but no timed performance exploration. Manual configurations that cannot satisfy the observed responsiveness policy fail clearly.
 
-The baseline is commit `7a3e6289dd576d88258e70b83213a2d39e51ad2f`. Its GPU sources, SPIR-V and executable were preserved before modification. Baseline and candidate measurements use identical host code and measurement boundaries, differing only in the embedded production search shader except where a dispatch-setting comparison is explicitly identified. The target is Windows/amd64, Ryzen 9 9950X3D, RTX 5090, NVIDIA driver 616.64, WDDM, with the display active and the reported 575 W power limit unchanged.
+## 5. Measurement method and baseline attribution
 
-Both Go and PACE report Go 1.27.1 windows/amd64. PACE is the timing target; stock Go is a compatibility target. Builds use builder v0.5.1 with `--cgo --pace --dyn --compat --no-gen`, `-pgo=off`, `-tags gpu`, trimpath, buildvcs disabled and stripped binaries, targeting amd64 v1. Shader generation uses Vulkan SDK 1.4.328.1: glslc reports shaderc v2023.8 / v2025.3-10-gc7e73e8, glslang 11.1.0-1302-gd213562e and SPIRV-Tools v2025.4 / v2022.4-970-g19042c89; the validator reports SPIRV-Tools v2025.4-0-g7f2d9ee9. Compilation uses `--target-env=vulkan1.3 -O` throughout.
+### 5.1 Controls and boundaries
 
-The historical harness measurement procedure invokes `gpu.Run` and `search.RunQueued`, fixes `GOMAXPROCS=3` and process affinity to logical processors 2 through 7 and pins the sole CPU search worker to logical processor 2. The remaining controller/runtime threads have the same allowed scheduling set in every variant. CPU SIMD selection stays automatic. GPU-only comparisons precede mixed comparisons; builds, correctness tests, profiling and timed comparisons are separate sequential activities. Validation is disabled during timing. No all-core or multiple-CPU-search-worker benchmark is used. Section 8.1 separately measures the actual CLI and its shared reporting boundaries.
+Measurements use Windows/amd64, Ryzen 9 9950X3D, RTX 5090, NVIDIA 616.64, WDDM and an active display. Go/PACE report Go 1.27.1. Performance executables use PACE with builder's `--cgo --dyn --compat --no-gen`, `-pgo=off`, `-tags gpu` and the same amd64-v1 target. Stock Go is separately checked for compatibility. Shader compilation uses Vulkan SDK 1.4.328.1, `glslc --target-env=vulkan1.3 -O` and `spirv-val`. Builds, tests, profiles and timed runs execute sequentially. Vulkan validation is enabled for correctness and disabled for timing.
 
-The four workloads are a single rare prefix (`somethingrare.`), a three-prefix set (`somethingrare.`, `anotherrare.`, `onionsearch.`), a long prefix (51 `a` characters followed by `.`) and frequent hits (`a.`). Workloads, affinity, build settings, result capacity and candidate accounting match within every comparison. Seeds come from the same production entropy path, not identical deterministic streams; candidate-rate distributions rather than identical keys are compared. The persistence callback is a no-op, but independent host reconstruction, exact matching, stream pausing, acknowledgement and seed replacement remain enabled. Frequent-hit results therefore include the production match protocol but not filesystem persistence latency.
+The real CLI runs in a separate console process group with affinity to all 32 logical processors. CPU-only, GPU-only, exactly one application-pinned CPU worker and all requested CPU workers are measured. The normal application `GOMAXPROCS` policy is unchanged: workers plus two in GPU mode. No worker reservation, affinity reinterpretation or CPU arithmetic change is adopted. The rare workload is `chopperepic.` with normal filesystem persistence; no matches occurred in its timing runs.
 
-### 5.2 Warm-up, stability and accounting
+Primary comparisons use ten alternating baseline/candidate pairs. Each process runs sixteen seconds; the run statistic averages completed four-second recent windows after the first eight seconds. Short screens use twelve to twenty seconds and are labeled separately. This is a fixed warmed interval, not the older paper's adaptive long warm-up gate. Selection normally finishes before the measured windows. GPU-only automatic runs show some continuing driver/startup variation, retained in their wider distribution. Development measurements are separate from the end-user startup budget.
 
-A one-second warm-up proved insufficient on this machine; those exploratory measurements are excluded from the results below. For each primary ten-pair comparison, both variants in the first pair run at least 30 seconds before measurement. Subsequent sequential runs require at least six seconds and an independently checked plateau. The latest six approximately one-second progress-rate windows must have a full range no greater than 3% of their mean, with the first-three/last-three mean difference no greater than 1.5%. The accepted steady interval is five seconds followed by cancellation and draining. Mixed runs start their pinned CPU worker before GPU warm-up. Alternating baseline/candidate and candidate/baseline ordering reduces systematic order effects; minimum, median and maximum are reported rather than claiming confidence intervals.
+Tables with uncertainty report a mean and nominal 95% Student-t interval half-width across ten run statistics, using nine degrees of freedom. These intervals are descriptive: serial system state can correlate runs and they are not paired-ratio confidence intervals. A one-second opt-in diagnostic separately exposes cumulative CPU and GPU completed counts, execution/gap times, submission/record/copy costs, explicit copy sizes, filter hits, overflow and verification backlog. Backend rates in attribution tables use the same diagnostic endpoints rather than adding separately timed rates.
 
-Frequent mixed search did not reliably meet a one-second-window stability criterion. Its final comparisons and matched CPU-only controls instead use six ten-second windows, a 5% range limit, a 2.5% half-window drift limit and twenty-second steady intervals. Accepted mixed warm-ups lasted 61-151 seconds. Frequent search at 4,096 streams uses a separately identified, noisier 10% range / 5% drift gate and ten-second intervals. Runs failing their gate are excluded and are not evidence of an improvement. Stability gating does not eliminate between-run scheduling variation, especially in mixed and frequent-hit workloads.
+Process CPU cost uses Windows user-plus-kernel process time divided by wall time. It includes initialization, runtime and process-attributed driver activity; it is not an isolated controller-thread measurement. CPU profiling attributes stacks, not reliable CPU occupancy while inside a blocking Windows CGO call. Explicit `vkCmdCopyBuffer` payloads, logical host memcpy bytes and logical consumed result bytes are reported separately. Hardware PCIe counters were unavailable, so none is labeled measured PCIe bus traffic.
 
-For the historical measurements below, end-to-end GPU throughput divides the post-warm-up checked-count delta by host time through return, including final draining. CPU progress callbacks provide their own count/timestamp pair, so CPU throughput uses that exact CPU count window through worker completion. The GPU and CPU windows overlap but need not start at precisely the same instant; those combined rates sum separately normalized rates. CPU-only controls use the same API, affinity and workload, with ten runs per workload. GPU execution throughput divides all logical checked counts by all compute timestamp intervals, including warm-up. Execution and steady end-to-end rates consequently have different boundaries and are not algebraic complements. Gaps are measured from a dispatch's end timestamp to the next dispatch's start timestamp.
+### 5.2 Reproducing the original behavior
 
-The CLI now uses one coordinator to sample all enabled backends every four seconds. Checked counts and runtime stay cumulative; the live `recent` rate is the combined completed-count delta divided by the actual monotonic elapsed time between snapshots. Each boundary reads the existing batched CPU publications and completed GPU dispatch counts directly, without callback caching, extra GPU synchronization or readbacks. The initial count/time baseline precedes backend setup; startup affects only the first interval. Live 50%/95% waits use this recent combined rate, with zero throughput and unavailable waits when no work completes. Periodic reporting stops on cancellation or backend shutdown, and one final summary uses authoritative totals after accepted work and saves drain. Its `overall avg` divides total checked keys by the full runtime, including backend setup and shutdown. Device-only GPU timestamp throughput remains a separate diagnostic; the historical tables have not been remeasured using the new CLI intervals.
+These initial twenty-second CLI screens are single runs, not ten-pair estimates. Rates are millions of completed keys/s from warmed recent windows.
 
-Host CPU cost is the process user-plus-kernel CPU-time delta divided by steady wall time. For GPU-only operation it measures controller, verifier, Go runtime and process-attributed driver cost together, not an isolated controller-thread profile or system-wide driver cost. Logical upload/read counts are not PCIe bus measurements. Before/after telemetry accompanies the comparisons; a separate baseline/candidate run samples NVIDIA clock, power, temperature and utilization every 500 ms during load, without mixing those instrumented runs into the primary performance table.
-
-### 5.3 Available production-shader profiling
-
-The installed driver exposes `VK_KHR_pipeline_executable_properties`; querying the compiled production compute pipeline provides the following static statistics. Native binary size and shared memory are driver reports, not source estimates. The reported subgroup size is 32 for every variant.
-
-| Shader | SPIR-V bytes | Native binary bytes | Registers/thread | Shared bytes | Stack bytes |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Original baseline | 176,988 | 535,936 | 168 | 6,944 | 0 |
-| Shared inversion | 131,664 | 416,896 | 168 | 7,968 | 0 |
-| Shared inversion + fixed-index multiply/square | 304,304 | 417,024 | 168 | 7,968 | 0 |
-| Retained shared inversion + bounded carries | 157,464 | 350,208 | 168 | 7,968 | 0 |
-| Retained + explicit high/low products | 182,936 | 515,968 | 255 | 7,968 | 0 |
-
-The local-memory-size statistic returned implausible values near 68.7 billion bytes even though its format was explicitly `UINT64`; it is unusable for determining spills. The driver returned no internal representations and an installed Nsight runtime profiler was unavailable. Thus local-memory traffic, actual occupancy, native instruction mix and barrier/dependency stall counters were not measured. Source loops and array indices do not prove runtime overhead or spilling. Register and code-size observations support controlled comparisons but cannot by themselves attribute a throughput change to occupancy, instruction-cache pressure or a particular stall.
-
-## 6. Component selection
-
-Rates throughout are millions of logically checked candidates per second. Brackets give the full observed range. Component comparisons use rare-prefix GPU-only search at 256 streams/four rounds, with the warm-up procedure above. A and C are confirmed with ten alternating pairs each; clear losing prototypes use two-pair screens, not ten-pair precision claims.
-
-| Component comparison | Control median [range] | Candidate median [range] | Decision |
-| --- | ---: | ---: | --- |
-| A: shared inversion versus original | 169.43 [168.53-169.97] | 252.24 [250.78-253.40] | Retain; approximately 48.9% faster. |
-| B: fixed-index multiply and dedicated square versus A | 252.90 [252.80-253.00] | 220.22 [214.68-225.76] | Reject expanded arithmetic. |
-| B: fixed-index multiply only versus A | 252.38 [251.33-253.44] | 181.69 [154.86-208.52] | Reject isolated multiply expansion. |
-| B: fixed-index square only versus A | 252.62 [252.31-252.92] | 190.06 [166.92-213.20] | Reject isolated square expansion. |
-| C: lazy add/subtract alone versus A | 252.84 [252.83-252.85] | 222.69 [222.32-223.06] | Insufficient alone. |
-| C: split carry alone original add/subtract, versus A | 252.29 [251.48-253.10] | 253.54 [253.53-253.55] | Small screen difference, not an independently established gain. |
-| C: lazy add/subtract plus split carry versus A | 252.68 [251.35-252.92] | 272.92 [271.37-273.17] | Retain the useful combination; approximately 8.0% faster. |
-| C: immediately normalize add/subtract versus retained lazy version | 272.43 [271.57-273.28] | 260.25 [259.99-260.52] | Retain lazy outputs. |
-| D: explicit high/low products versus retained shader | 271.53 [271.28-271.78] | 204.30 [203.91-204.68] | Reject 32-bit product prototype. |
-
-The fixed-index prototype uses constant limb indices and coefficients with one scalar 64-bit accumulator per output limb, preserving the radix and dedicated 55-term symmetric square. Both isolated expansions and the combined variant lose after sustained warm-up. The isolated variants have unusually long cancellation/teardown tails in their first runs (1.66 seconds for multiply, 1.45 seconds for square), included in their end-to-end ranges rather than discarded. Even their timestamp-only execution rates, approximately 214 and 219 respectively, are below the matched A controls' 257-260. Larger SPIR-V did not reduce the reported register count or improve complete search. These experiments compare loop-based and explicit scalar schedules, not every possible partial-unrolling policy.
-
-The bounded-carry result illustrates why useful subcomponents must be evaluated together after isolation: lazy addition alone loses, while lazy addition paired with split reduction wins reliably. Retaining only individually positive screens would discard the winning combination. No unmeasured radix change is needed.
-
-The 32-bit prototype uses `umulExtended` for full high/low products, preserves the high part of coefficient scaling, uses `uaddCarry` plus explicit high-word accumulation and reconstructs a 64-bit value only for reduction. It passes the differential tests, including maximum lazy inputs and repeated chains. Nevertheless, register allocation rises from 168 to 255 and native code grows from 350,208 to 515,968 bytes while complete-search throughput falls. This is evidence against that bounded prototype, not evidence that every explicit 32-bit schedule is inferior. The retained implementation uses 32-bit bounded addition/subtraction and late carries, with 64-bit products and wide reduction where they measured better.
-
-## 7. Complete-search results
-
-### 7.1 GPU only at production defaults
-
-Each row represents ten alternating original/retained pairs. GPU execution values are medians with the broader timestamp boundary described above. Gains are medians of per-pair ratios, rather than ratios of independently rounded table entries.
-
-| Workload | Original end to end [range] | Retained end to end [range] | GPU execution original ? retained | Paired gain [range] |
-| --- | ---: | ---: | ---: | ---: |
-| Single rare prefix | 168.967 [168.701-169.489] | 271.955 [271.330-272.478] | 171.975 ? 279.020 | 60.87% [60.45-61.29%] |
-| Three-prefix set | 168.770 [166.492-169.248] | 271.274 [270.540-272.262] | 171.413 ? 278.104 | 60.78% [60.02-62.54%] |
-| Long prefix | 169.431 [168.573-169.574] | 272.832 [271.378-273.063] | 172.131 ? 279.636 | 61.00% [60.95-61.46%] |
-| Frequent hits | 1.641 [1.638-1.652] | 1.641 [1.637-1.648] | 1.837 ? 1.821 | -0.10% [-0.58-0.56%] |
-
-The arithmetic gain survives the complete pipeline for rare candidates, including long prefixes that require exact host matching if the necessary condition succeeds. It does not improve frequent-hit throughput. Logical candidate counting stops at the first pending match, so the frequent-hit execution rate is not a raw measure of how many affine ordinates the shader physically computes.
-
-### 7.2 GPU plus exactly one pinned CPU worker
-
-The same ten-pair comparison is repeated with the single pinned worker active throughout warm-up and measurement. Combined columns are medians of each run's sum, not sums of separately rounded medians.
-
-| Workload | GPU end to end original ? retained | GPU execution original ? retained | Original combined [range] | Retained combined [range] |
-| --- | ---: | ---: | ---: | ---: |
-| Single rare prefix | 169.295 ? 272.130 | 172.062 ? 279.275 | 232.885 [225.001-236.979] | 330.185 [327.560-336.292] |
-| Three-prefix set | 169.138 ? 271.999 | 171.942 ? 278.801 | 208.748 [207.684-214.747] | 311.427 [309.607-317.554] |
-| Long prefix | 168.477 ? 270.795 | 171.247 ? 277.935 | 232.535 [232.342-237.266] | 334.550 [334.451-340.612] |
-| Frequent hits | 1.028 ? 1.025 | 1.214 ? 1.192 | 2.946 [2.622-2.964] | 2.951 [2.644-2.969] |
-
-| Workload | CPU-only control [range] | CPU alongside original [range] | CPU alongside retained [range] | CPU retention original ? retained |
-| --- | ---: | ---: | ---: | ---: |
-| Single rare prefix | 61.988 [61.802-62.246] | 64.014 [55.778-68.402] | 57.876 [55.575-65.242] | 103.3% ? 93.4% |
-| Three-prefix set | 46.331 [45.853-46.570] | 39.604 [39.445-45.431] | 39.363 [39.272-45.180] | 85.5% ? 85.0% |
-| Long prefix | 66.835 [66.726-66.978] | 64.048 [63.912-67.831] | 63.815 [63.724-67.930] | 95.8% ? 95.5% |
-| Frequent hits | 2.036 [1.914-2.787] | 1.924 [1.515-1.940] | 1.929 [1.542-1.946] | 94.5% ? 94.7% |
-
-Retention is the ratio of mixed and CPU-only medians. The rare workload's original retention exceeding 100%, its wide mixed CPU range and the frequent workload's broad control range show that host scheduling/system state remains material despite fixed affinity and warm-up. The retained rare median is below the original mixed CPU median and the data do not justify attributing that difference solely to shader execution or promising a fixed CPU-retention percentage. GPU rate gains are much more consistent than CPU rates in these mixed runs.
-
-### 7.3 Dispatches, host cost and telemetry
-
-For single-prefix GPU-only search, the median dispatch interval falls from 762.16 to 469.76 microseconds. Average inter-dispatch gaps rise slightly from 9.36 to 10.09 microseconds; their fraction of execution-plus-gap time rises from 1.21% to 2.10% because compute is faster. Mixed rare search has 761.77 ? 469.33 microsecond dispatches and 9.32 ? 10.32 microsecond gaps (1.21% ? 2.15%). Thus the retained rare workload still spends about 98% of timestamped queue time inside dispatches. This is observed timing, not attribution to a particular arithmetic instruction or barrier.
-
-| Workload/mode | Original process core equivalents [range] | Retained process core equivalents [range] |
+| Original implementation/mode | Streams/rounds | Combined Mkeys/s |
 | --- | ---: | ---: |
-| Rare GPU only | 0.512 [0.019-0.523] | 0.527 [0.485-0.641] |
-| Rare mixed | 1.448 [0.899-1.521] | 1.410 [0.909-1.537] |
-| Three-prefix GPU only | 0.510 [0.501-0.607] | 0.524 [0.047-0.545] |
-| Long-prefix GPU only | 0.513 [0.022-0.529] | 0.521 [0.022-0.532] |
-| Frequent GPU only | 1.615 [1.421-1.666] | 1.620 [1.119-1.664] |
-| Frequent mixed | 2.139 [1.922-2.429] | 2.125 [1.919-2.145] |
+| CPU only, all workers | - | 1,284.681 |
+| GPU only original default | 256/4 | 273.496 |
+| GPU + one pinned CPU original default | 256/4 | 338.988 |
+| GPU + all CPU workers original default | 256/4 | 1,321.621 |
+| GPU only, historical target | 4096/2 | 637.975 |
+| GPU + all CPU workers | 8192/8 | 1,942.157 |
+| GPU + all CPU workers | 16384/4 | 1,945.642 |
 
-The unusually low process-accounting samples are retained in the ranges; process accounting is not a reliable per-thread attribution instrument. The medians show nonzero controller/runtime/driver cost and substantially greater host work for frequent hits. Frequent GPU-only dispatches average 116.52 ? 123.33 microseconds, with 12.91 ? 12.65 microsecond gaps (9.97% ? 9.28%). Streams waiting for verification can be paused inside otherwise short dispatches, so queue-gap percentages alone do not describe their utilization.
+Instrumentation explains why GPU-only settings do not transfer directly to all-core operation. At original 4096/2, GPU-only search delivered 634.18 Mkeys/s with 1.644 ms execution and 0.009 ms mean gaps. With all CPU workers, GPU contribution fell to 230.03 Mkeys/s while CPU contribution remained 1,306.23 Mkeys/s; gaps averaged 2.928 ms. Measured command-recording wall time increased from approximately 17.7 microseconds to 998 microseconds per submission, including scheduling delay. At 16384/4, the original all-core window delivered 1,277.95 CPU plus 627.47 GPU Mkeys/s, with 11.997 ms execution and 1.393 ms gaps. This attributes the short-batch loss to coordination/scheduling as well as shader sizing, without assuming a particular core reservation would help.
 
-At production defaults, the maximum observed cancellation-to-return interval across these GPU-only and mixed tables is 28.03 ms, including pending-hit drainage and final verification with the no-op save callback. This is an observed bound for these workloads, not a deadline guarantee for arbitrary storage or driver delays.
+### 5.3 Equal-work stream experiment
 
-In the separate sampled rare-prefix telemetry check, both shaders were in P0 with a 14,201 MHz reported memory clock and 99-100% device utilization. Sixteen 500 ms samples selected from an eight-second interior steady interval showed 2,940 MHz graphics clock and 174.35 W median board power for the original (174.09-174.75 W, 52\UffffffffC), versus 2,925 MHz and 175.09 W for the retained shader (174.41-175.27 W, 54-55\UffffffffC). These are one instrumented run per variant at default settings, not energy-efficiency confidence intervals or telemetry for the full sweep. Utilization reporting also does not establish shader occupancy.
+Every setting below completes 8,388,608 candidates per no-hit submission. These are brief screens; they distinguish useful independent-stream parallelism from simply multiplying submitted work.
 
-## 8. Bounded stream/round sweep
-
-The retained shader was screened over the following small settings grid, with three warmed repetitions per setting. Rates and dispatch durations are medians; result capacity follows stream count and the queue retains two slots.
-
-| Streams | Rounds | End-to-end rate | Dispatch milliseconds |
+| Streams/rounds | Original GPU-only Mkeys/s | Retained GPU-only Mkeys/s | Retained all-core combined Mkeys/s |
 | ---: | ---: | ---: | ---: |
-| 128 | 4 | 137.06 | 0.467 |
-| 256 | 2 | 267.20 | 0.234 |
-| 256 | 4 | 273.07 | 0.469 |
-| 256 | 8 | 275.95 | 0.937 |
-| 512 | 2 | 423.09 | 0.298 |
-| 512 | 4 | 434.42 | 0.591 |
-| 1,024 | 4 | 451.15 | 1.148 |
-| 1,024 | 8 | 452.57 | 2.296 |
-| 2,048 | 2 | 552.55 | 0.936 |
-| 2,048 | 4 | 561.65 | 1.851 |
-| 4,096 | 2 | 632.17 | 1.646 |
-| 4,096 | 4 | 630.72 | 3.313 |
+| 4096/16 | 621.478 | 2,047.070 | 3,038.843 |
+| 8192/8 | 667.586 | 2,527.541 | 3,388.115 |
+| 16384/4 | 691.359 | 2,793.359 | 3,592.589 |
 
-Ten alternating retained-shader pairs confirm 256/four at 272.10 [270.62-273.67] against 4,096/two at 631.87 [628.52-633.93]. Maximum rare-prefix cancellation latency is 22.74 versus 24.69 ms. Increasing rounds at 4,096 streams doubles dispatch duration without raising throughput, so two rounds is the better rare-prefix setting within this grid. This establishes dispatch-parallelism headroom at the defaults, not a measured occupancy explanation.
+Larger independent stream counts improve throughput at identical work size. More rounds can then amortize remaining coordination: the retained 16384/16 configuration reaches approximately 4.10 billion combined keys/s even though GPU-only throughput is already near its plateau at four rounds. Automatic selection must therefore be revalidated after the packed-pass shader change; the monolithic shader's successful four-round combined setting is no longer sufficient.
 
-To separate shader gains from setting gains, ten original/retained pairs also use identical 4,096/two settings for each rare workload: single-prefix medians 334.92 ? 631.73, three-prefix 334.66 ? 630.69 and long-prefix 335.94 ? 630.45. Single-prefix ranges are [333.88-336.47] and [628.88-633.86], with dispatch durations 3.107 ? 1.644 ms. Thus the approximately 89% same-setting shader gain is distinct from the larger ratio obtained by comparing differently configured binaries.
+## 6. Component experiments
 
-Frequent search does not benefit from that stream count. Under its separately relaxed stability gate, ten pairs give 1.355 [1.348-1.412] ? 1.383 [1.344-1.409], both below the approximately 1.64 at the default stream count. Maximum cancellation latency grows to approximately 108 ms because more streams can hold work requiring verification/drainage. The production default therefore remains 256/four. This original sweep exercised the larger rare-prefix setting through GPU options; section 8.1 makes that setting explicitly selectable from the CLI and verifies its single-worker mixed behavior. Automatic workload-dependent selection remains unimplemented.
+### 6.1 Repeated complete-search comparisons
 
-### 8.1 Reproducible CLI baseline
+All rates below are Mkeys/s. Each row has ten alternating pairs for each listed mode; host bundle and shader increments are separately compared before evaluating the delivered combination.
 
-GPU builds expose `--gpu-streams` (1-16,384, default 256) and `--gpu-rounds` (1-64, default 4). Both require an enabled `--gpu`; explicit zero, negative, out-of-range and noninteger values are rejected. Ordinary builds expose none of these GPU flags. Once device creation and seed initialization complete, the CLI prints the selected device name, stream count and round count exactly once, before its first GPU submission. The shared four-second progress line and final aggregate accounting retain the semantics in section 5.2.
+| Change and settings | GPU-only control | GPU-only candidate | All-core combined control | All-core combined candidate |
+| --- | ---: | ---: | ---: | ---: |
+| Resident host path original shader, 16384/4 | 691.97 +/- 1.34 | 699.51 +/- 1.38 | 1,987.95 +/- 7.41 | 2,012.00 +/- 4.98 |
+| One checked atomic per monolithic workgroup, 16384/4 | 698.81 +/- 1.58 | 787.60 +/- 1.43 | 2,007.32 +/- 6.62 | 2,098.83 +/- 8.17 |
+| Packed passes versus monolithic local count, 16384/4 | 788.03 +/- 1.13 | 2,788.31 +/- 4.60 | 2,094.60 +/- 8.67 | 3,514.31 +/- 63.75 |
+| Accumulate across packed rounds, 16384/16 | 2,747.32 +/- 5.31 | 2,799.30 +/- 2.55 | 4,053.81 +/- 8.85 | 4,103.84 +/- 9.49 |
 
-The following PowerShell commands build the measured executable and run the higher-throughput configuration with the actual filesystem persistence path. `--cpu off` selects GPU-only search; replacing it with `--cpu 1` enables exactly one CPU search worker, pinned by the application when topology is available. Ctrl+C requests normal cancellation and drainage.
+The retained candidate wins every pair in these comparisons. The packed-pass improvement is not an isolated inversion benchmark. The counter improvement is small after packing but repeatable; per-stream accumulation plus one final atomic is retained instead of an extra reduction pass.
+
+Independent host ablations on the packed implementation clarify the bundle. Ten GPU-only pairs at 16384/16 give 2,737.36 +/- 2.91 with host-visible command/results versus 2,804.40 +/- 2.93 with device-local command/results, leaving the same explicit staging copies in both variants. Full-capacity readback gives 2,802.79 +/- 1.85 versus bounded readback's 2,805.39 +/- 3.03: essentially tied throughput, but 393,232 versus 6,160 explicit bytes per submission, a 63.8-fold payload difference. The simpler bounded copy is retained.
+
+Always re-recording and always uploading full commands were separately screened. At 16384/16 their all-core rates were approximately 4,096 and 4,064 Mkeys/s versus corresponding retained controls of 4,107 and 4,112. Their warmed GPU-only process costs could approach 0.9-1.0 core instead of approximately 0.02-0.04. Attempts at ten-pair confirmation repeatedly stopped on the explicit responsiveness guard after unexpectedly long observed submissions; some also had long driver teardown. Those incomplete series are not presented as ten successful pairs. They reinforce the lifecycle/host-cost case for reuse, while the complete host bundle has its own successful ten-pair confirmation. Dirty uploads and reuse interact: a changed upload range necessarily changes recorded commands.
+
+### 6.2 Rejected shader alternatives
+
+These are short complete-search screens, not ten-pair precision claims. Clear losses were removed from production.
+
+| Prototype | Matched GPU-only control → candidate Mkeys/s | Decision |
+| --- | ---: | --- |
+| Move numerator products after inversion, monolithic 16384/4 | 786.5 → 592.5 | Reject shorter source lifetimes; complete search loses about 25%. |
+| Generate/filter plus and minus sequentially, monolithic 16384/4 | 789.7 → 642.8 | Reject; approximately 19% slower. |
+| Store per-workgroup counts and perform a separate linear GPU reduction | 785.4 → 592.5 | Reject this simple reduction prototype; no claim that every parallel reduction loses. |
+| Store numerator/mixed intermediates across packed passes, 16384/16 | 2,747.1 → 2,516.7 | Reject extra scratch/traffic; selective recomputation wins. |
+
+The existing product-tree layout is retained. Static register information and a source-visible inversion-lane imbalance justified the packed-root experiment, but runtime bank-conflict, active-lane and barrier counters were unavailable. A transpose, subgroup tree or cooperative field arithmetic is not adopted on an unmeasured occupancy hypothesis. Earlier rejected fixed-index unrolling and explicit high/low 32-bit arithmetic are not repeated: they increased code/register cost and lost complete-search throughput in the preceding study. The current field arithmetic remains the established bounded-limb implementation.
+
+### 6.3 Available profiling and remaining bottleneck
+
+The driver exposes `VK_KHR_pipeline_executable_properties`. The retained packed shader reports 159,520 SPIR-V bytes, 351,104 native bytes, 128 registers/thread, 5,920 shared bytes and zero stack bytes, versus 168 registers and 7,968 shared bytes for the monolithic predecessor. Subgroup size is 32. Its local-memory statistic is an implausible approximately 68.7 billion bytes and cannot establish spills. No internal representations or installed Nsight runtime profiler were available. Actual active lanes, occupancy, spills, instruction dependencies, shared-bank conflicts and barrier/bandwidth stall counters remain unmeasured. Lower registers support, but do not replace, the complete-search result.
+
+The production submit/collect benchmark at 16384/16 reports 12.026 ms/op, **0 B/op and 0 allocs/op**, with initialization/seeding outside the measured loop and exact count assertions inside it. A CPU profile attributes most samples to CGO/fence collection; Windows sampling includes blocking C waits and must not be interpreted as a fully occupied controller core. Independent process-time observations establish the much lower steady controller/runtime cost of reusable manual configurations.
+
+After adequate combined sizing, measured queue gaps become small and the remaining rare-search interval is predominantly the GPU-resident sequence. Storing more intermediates demonstrably makes that sequence slower. Distinguishing arithmetic dependencies from scratch bandwidth or barriers requires better runtime profiling, so none is asserted as the uniquely proven shader bottleneck. For short all-core submissions, coordination gaps remain a measured bottleneck; for frequent hits, verification and actual filesystem persistence are dominant practical constraints.
+
+## 7. Delivered automatic configuration
+
+### 7.1 Ten alternating automatic/manual pairs
+
+| Mode | Automatic Mkeys/s | Best manually tested Mkeys/s | Automatic gap |
+| --- | ---: | ---: | ---: |
+| GPU only | 2,716.56 +/- 29.31 | 2,785.94 +/- 2.88 at 16384/4 | 2.49% |
+| GPU + all requested CPU workers | 4,044.02 +/- 19.04 | 4,099.03 +/- 9.91 at 16384/16 | 1.34% |
+
+GPU-only automatic selection often prefers 16384/1 because the short-tail result is within the practical tie band; four rounds gives a small repeatable throughput advantage. All-core automatic choices generally use 16,384 streams and approximately 13-26 rounds, depending on the observed tail and combined samples. There is no repeatable gap above 5%, but the mean differences are larger than these nominal confidence intervals. Automatic mode approaches the tested plateau with better responsiveness when effectively tied; it does not exactly reproduce the manual maximum. A cold/driver-active GPU-only sample was approximately 6% behind and remains in the reported distribution rather than being silently discarded.
+
+### 7.2 Same-window CPU/GPU attribution
+
+These separate final diagnostic runs are individual warmed windows, not the repeated means above. Each row's CPU and GPU deltas share precisely the same endpoints. The CPU-only control is a separate recent-window observation.
+
+| Mode | Window seconds | CPU Mkeys/s | GPU Mkeys/s | Combined Mkeys/s |
+| --- | ---: | ---: | ---: | ---: |
+| CPU only, all workers | four-second reports | 1,313.746 | - | 1,313.746 |
+| GPU only, automatic | 6.002 | 0 | 2,676.187 | 2,676.187 |
+| GPU + one pinned CPU, automatic | 7.004 | 63.589 | 2,678.584 | 2,742.173 |
+| GPU + all CPU workers, automatic | 7.031 | 1,311.966 | 2,812.562 | 4,124.528 |
+
+The mixed CPU contribution remains approximately the CPU-only control in this screen. No CPU-core reservation is needed to explain or obtain the retained gain. This is not a ten-pair CPU-retention confidence claim.
+
+| Same-window metric | GPU only | GPU + one CPU | GPU + all CPUs |
+| --- | ---: | ---: | ---: |
+| Submissions/s | 1,276.1 | 1,277.2 | 63.9 |
+| Mean full sequence, ms | 0.777 | 0.776 | 15.657 |
+| Mean inter-sequence gap, ms | 0.00681 | 0.00667 | 0.00636 |
+| Host copy timer, microseconds/submission | 0.049 | 0.054 | 0.129 |
+| Recording/reset timer, microseconds/submission | 0.497 | 0.547 | 1.135 |
+| Queue-submit timer, microseconds/submission | 13.72 | 14.51 | 42.68 |
+| Explicit command upload bytes/s | 0 | 0 | 0 |
+| Explicit bounded readback bytes/s | 7,860,808 | 7,867,850 | 393,399 |
+| Logical result bytes consumed/s | 20,418 | 20,436 | 1,022 |
+
+Timers include wall-clock scheduling delay and timer overhead, not just exclusive CPU execution. The recording timer includes fence reset even when no command buffer is rebuilt. Across the entire final all-core run, only 45 recordings and 2,162,688 command-upload bytes were needed, including initial seeding and configuration transitions. Original 16384/4 GPU-only submissions performed roughly 179 MB/s of logical full-command memcpy; that number was not a hardware transfer measurement.
+
+### 7.3 Startup, submission tails and cancellation
+
+Warm GPU-only automatic runs typically reach first useful work in approximately 0.13-0.15 seconds and final selection in 4.35-4.70 seconds. Warm all-core first work is approximately 0.30-0.63 seconds, with selection in 5.06-5.49 seconds. First runs of new shader variants observed approximately 1.86-2.13 seconds to useful work and approximately 6.1-6.4 seconds to selection; an earlier variant took 2.54/6.82 seconds. These are observed colder driver/cache runs, **not controlled cache-flushed cold starts**. Initialization diagnostics separately expose total bridge and pipeline-creation time. No universal ten-second hard deadline is claimed around blocking initialization.
+
+Final telemetry runs observed maximum full submitted-sequence times of approximately 17.2-18.0 ms, including calibration and transfers. The all-core steady mean was 15.66 ms. The maximum recorded gap was approximately 159 ms during startup/transitions, distinct from a long GPU submission. These are observed maxima, not p99 estimates; no duration histogram was collected. Entire multi-pass sequences, rather than only an inversion pass, feed the responsiveness guard. At most two such sequences can be queued.
+
+Cancellation-to-process-exit is broader than GPU drainage. The final rare runs drained accepted GPU/verification work in approximately 0.5 ms GPU-only, 0.75 ms with one CPU and 11.3 ms with all CPUs; last useful submission timestamps precede drainage. Many controlled manual runs exited roughly 36-84 ms after interruption. Some automatic runs took 1.2-1.55 seconds: opt-in teardown timestamps locate delays in `vkDestroyDevice` or `vkDestroyInstance` after GPU drainage. One earlier uninstrumented run was terminated by the measurement harness's 30-second shutdown watchdog; its precise cause remains unresolved. It is not counted as a successful comparison and is not explained away as GPU work. No fence timeout or OS watchdog change is used to conceal these limitations.
+
+### 7.4 Frequent hits, long prefixes and actual saves
+
+A one-second GPU-only automatic run with overlapping `a.`, `ab.` and `b.` prefixes was interrupted during calibration. It completed 12,638 candidates and independently saved all 795 accepted matches. First GPU work began at 131 ms; new useful submissions stopped at approximately one second, but actual filesystem persistence took another 1.082 seconds to drain. Early trials reported backlogs of 255 and 511, which constrained growth. Hit handling proceeds during calibration rather than waiting for the four-second progress tick. This is a correctness/backpressure example, not a steady frequent-hit throughput benchmark.
+
+A separate two-second run with a 51-character prefix and another twelve-character prefix completed 4,366,761,984 candidates, no matches and approximately 15.8 ms drainage before teardown. Deterministic tests additionally exercise overlapping masks, the twelve-character acceptance limit, partial counts, frequent hits and near-epoch exhaustion. Diagnostics report delivered filter hits, undelivered overflow and verifier queue depth; the exact instantaneous population of all paused GPU streams is not separately read back. Paused-state semantics are tested rather than inferred from dispatch size.
+
+### 7.5 Allocation and telemetry observations
+
+At 16,384 streams, actual allocations are: 86,441,984 bytes for stream state/scratch, 7,936 for tables, two 2,162,688-byte command buffers, two 6,160-byte result buffers, two 2,162,688-byte upload buffers and two 6,160-byte readback buffers. State/table/commands/results use memory type 1, flags `0x1`, heap 0 of 33,750,515,712 bytes. Upload/readback use type 2, flags `0x6`, heap 1 of 33,113,260,032 bytes. These are actual selected allocation properties on this device, not assumptions about all host-visible memory.
+
+Separate eight-second telemetry snapshots report GPU clocks of 2,895-2,910 MHz, memory clock 14,201 MHz, temperatures 61-65 °C and board power 432-450 W during retained automatic search, with an unchanged 575 W limit and 99-100% reported utilization. CPU-only GPU idle power was approximately 63 W. Windows process peak working sets were approximately 336 MiB GPU-only, 393 MiB with one CPU and 97 MiB with all CPUs; private bytes were 446, 790 and 280 MiB respectively. Driver/cache state makes these process footprints variable. NVIDIA's 1,406-1,648 MiB used-memory readings are device-wide, not per-process resident allocations. CPU package power/temperature and hardware PCIe traffic were unavailable. These snapshots are not sustained thermal or energy-efficiency confidence measurements and utilization is not occupancy.
+
+## 8. Correctness, compatibility and reproducibility
+
+Permanent arithmetic tests compare production field operations with an independent big-integer model, including prime boundaries, noncanonical encodings, maximal lazy limbs, radix boundaries, repeated squaring and product-tree chains. A diagnostic shader compares 260 consecutive complete encoded public keys with independent scalar-base multiplication across center transitions. Filtering tests verify hits and checked counts over complete candidate ranges. Host tests cover all prefix lengths and reject corrupted or stale results.
+
+State-machine tests cover capacity-one overflow, no duplicate delivery, paused/resumed counters, stale acknowledgements, reseeding, step exhaustion and cancellation with 4,096 accepted matching streams. Added tests cover exact counts across stream activation/deactivation and cached command reuse, collection-only zero counts, cancellation during calibration with deliberately slow successful saves, explicit tuning overrides, deadline fallback to the best validated probe, noise thresholds, repeated comparisons and injected trial cancellation. Diagnostic shader data survives the separate passes. No test assertion was loosened to accommodate the new execution path.
+
+PACE and stock-Go full GPU-enabled suites passed with Vulkan synchronization validation: 325 tests ran, 322 passed and three were skipped at the final compatibility checkpoint. A subsequent focused deadline-fallback regression brings the GPU package to 21 passing tests, verified under both PACE and stock Go with synchronization validation. Ordinary PACE and stock-Go CGO-disabled suites ran 285 tests, with 284 passing and one skipped. Tests use `-vet=off`; only the custom vet tool is used for vetting. Windows/Linux/Darwin GPU-tagged checks and ordinary checks, including an arm64 ordinary target, passed. Optional Windows race instrumentation failed before tests began because ThreadSanitizer could not allocate its required region; race validation is unavailable rather than reported as passed.
+
+CPU-only builds pass with `CGO_ENABLED=0` and dependency inspection confirms no GPU package or `runtime/cgo` in their graph. Stock-Go GPU and CPU builds pass. A GNU-libc Linux GPU cross-build has the expected ELF interpreter; Linux runtime testing was unavailable. Builder's musl-target dynamic cross-build produced an ELF without an interpreter, so the documented compatible GNU target was used instead. No dependency was added or upgraded.
+
+Production search, full-point diagnostic and epoch SPIR-V are regenerated from the same source with the commands in [internal/gpu/BUILD.md](internal/gpu/BUILD.md), then validated. A second independent generation reproduced all three assets byte for byte and passed `spirv-val`. Arithmetic SPIR-V and its source are unchanged. Required builds and tests use committed source/assets and do not depend on temporary profiling or measurement fixtures. Example production build and invocation:
 
 ```powershell
-builder build go --pace --cgo --dyn --compat --no-gen --output bin/onino-cli-baseline.exe -pgo=off -tags gpu
-.\bin\onino-cli-baseline.exe --gpu auto --gpu-streams 4096 --gpu-rounds 2 --cpu off --output measurements\cli-matches chopperepic.
+builder build go --pace --cgo --dyn --compat --no-gen --output onino.exe -pgo=off -tags gpu
+.\onino.exe --cpu all --gpu auto chopperepic.
 ```
 
-These measurements use the retained shader and host revision `88c00df` plus the CLI overrides, on the same Windows/RTX 5090 system. The real executable is launched in its own console process group, inheriting process affinity `0xfc` (logical processors 2-7). The mixed run consequently pins its sole search worker to logical processor 2. The application chooses its normal `GOMAXPROCS`: two for GPU-only and three for mixed operation, unlike the historical harness's fixed three. The workload is `chopperepic.` instead of `somethingrare.`; the CLI performs normal persistence rather than substituting a no-op save callback. No matches occurred in these rare-prefix timing runs. Validation is disabled, and no shader or CPU arithmetic changes are involved.
+`--gpu-diagnostics` enables allocation, initialization, trial, per-second cumulative accounting and teardown details. Ordinary output remains one concise selected-configuration line, one shared progress report every four seconds and the existing final summaries. Progress uses recent combined completed work; the authoritative final overall average includes initialization, calibration, accepted-work drainage and shutdown. Private seeds remain host-side and saved keys remain independently verified.
 
-Three alternating pairs run sequentially in each mode, all GPU-only pairs before any mixed pair. The first pair requires at least 30 seconds after GPU readiness before the measured windows; later pairs require at least eight seconds. Each accepted run uses the latest six complete four-second `recent` windows, all after that warm-up. Their range must be at most 3% of the mean and their first-half/second-half mean drift at most 1.5%. All twelve runs passed without retries: the first pair in each mode lasted about 56 seconds per process and later pairs about 36 seconds. Each run's steady rate is the mean of those six actual-interval rates; table medians and ranges summarize the three run means. This is a reproducible CLI baseline, not a repeat of the historical ten-pair harness experiment.
+## 9. Conclusions and limitations
 
-| Mode | Streams/rounds | Recent steady Mkeys/s, median [range] | Final overall Mkeys/s [range] | Launch-to-ready ms [range] | Interrupt-to-exit ms [range] |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| GPU only | 256/4 | 273.852 [273.710-274.474] | [272.588-273.947] | [133.88-149.29] | [31.01-32.44] |
-| GPU only | 4096/2 | 637.184 [637.176-637.265] | [633.688-634.934] | [171.48-187.90] | [32.98-34.86] |
-| GPU + one pinned CPU | 256/4 | 343.506 [342.968-343.507] | [341.821-342.734] | [130.32-137.59] | [32.55-33.01] |
-| GPU + one pinned CPU | 4096/2 | 706.286 [706.193-706.415] | [702.900-704.124] | [170.86-174.46] | [33.57-34.42] |
+The largest retained gain comes from placing independent inversion roots in adjacent GPU invocations while keeping all passes resident. Dirty command ranges, reusable submissions, device-local result allocation, bounded readback and once-per-sequence checked accounting make that faster shader useful alongside all requested CPU workers. Separating streams from rounds is essential: independent work improves equal-sized batches, while longer, but still short, sequences amortize host scheduling under all-core load.
 
-The GPU-only median improves 2.327 times and the combined median 2.056 times. The approximately 637 Mkeys/s CLI result reproduces the earlier approximately 632 Mkeys/s harness improvement; the small absolute difference is not attributed to a new optimization, given the different workload, runtime scheduling and measurement windows. The mixed rate is sampled from the combined counters over one common interval, rather than adding independently timed backend rates.
+Automatic mode finds a near-plateau configuration within the observed startup budget and preserves useful calibration work. Its 1.34% combined and 2.49% GPU-only gaps are explicit remaining performance costs, not evidence of exact optimality or statistical equivalence. Frequent-hit storage drainage, driver initialization/destruction outliers, unavailable runtime shader counters, unmeasured instantaneous paused population and lack of cross-vendor runtime validation remain limitations. An earlier integrated-Radeon initialization failure is unresolved; the generic memory-layout path is not a portability result.
 
-Startup is externally measured with a monotonic clock from process launch to receipt of the readiness line, so it includes launch, device/pipeline creation, seed setup and pipe-delivery latency. The table is a warm-driver/cache observation: an earlier 12-second interrupt smoke check took 2.478 seconds to reach readiness at 256/4, followed by 0.185 seconds at 4096/2. No cache reset was performed, so these are not matched cold-start comparisons. Subsequent complete progress intervals recovered their steady rates independently of that initial delay. Cancellation is measured from sending Windows `CTRL_BREAK_EVENT` to successful process exit, including backend drainage, final output and process teardown; it is deliberately broader than the historical backend cancellation-to-return metric.
-
-Every repeated run emitted one readiness line and exactly one final aggregate summary. GPU-only final checked counts matched the GPU diagnostic exactly; mixed totals included positive CPU work in addition to the completed GPU count. All final checked totals exceeded the last periodic snapshot, accounting for accepted work completed during cancellation. For example, the first 4096/2 GPU-only run finished with 35,570,843,648 checked keys, zero saved matches and 56.023 seconds, reporting 634.934 Mkeys/s overall. The first mixed run finished with 39,448,183,296 keys (35,563,503,616 GPU plus 3,884,679,680 CPU), zero saved matches and 56.024 seconds, reporting 704.124 Mkeys/s overall. The overall average includes setup and shutdown; GPU device-timestamp and backend end-to-end diagnostics remain separately labeled and are not substituted for it.
-
-Validation covers flag boundaries/defaults, GPU-flag exclusion from ordinary builds, the one-time readiness callback, and cancellation with both the existing bounded-overflow case and 4,096 accepted matching streams at two rounds. The latter saves all 4,096 matches after cancellation begins. Stock Go and PACE suites pass with `-vet=off`, GPU tests use Vulkan synchronization validation, and ordinary `CGO_ENABLED=0` builds remain supported. Temporary executable, controller and timestamped measurement logs/JSON stay under the existing ignored `bin/`, `scripts/` and `measurements/` directories (`scripts/cli-baseline.go`, `measurements/cli-steady-*.{log,json}`). The defaults remain 256/four pending separate workload-dependent policy measurements.
-
-## 9. Interpretation and limitations
-
-Two localized changes survive full-search validation and repeated measurement: sharing the tree/jump inversion and combining lazy add/subtract with bounded split reduction. They preserve the independent CPU/GPU architecture, product tree, canonical filtering and resident-stream protocol. Generic 64-bit products and dedicated squaring outperform the tested fixed-index and explicit 32-bit alternatives on this driver. Neither source-level operation counts nor static register statistics alone explain those results.
-
-The next measured rare-prefix limitation is dispatch configuration: 256 streams leave substantial complete-search throughput available at larger stream counts. At the retained default, queue gaps account for only about 2% of timestamped time, making shader/dispatch work the larger measured interval. Within that interval, inversion scheduling, dependencies, barrier stalls, actual occupancy and local-memory traffic remain hypotheses until suitable runtime counters are available. Broader inversion-layout and host-interface redesigns are deferred.
-
-For frequent hits, unchanged end-to-end throughput despite the rare-search arithmetic gain, increased process CPU cost and worsening behavior with many pending streams identify the match-handling path as the next measured regime to investigate. A host profile is needed to distinguish reconstruction, reseeding, queue coordination and scheduling costs. The no-op persistence callback prevents inferring real disk save rates. Faster arithmetic does not remove stream pause/verification constraints.
-
-These results apply to this Windows RTX 5090/driver combination with PACE and controlled single-worker coexistence. They do not establish all-core scaling, stock-Go performance parity, cross-vendor runtime support or Linux execution support. Initialization, shader-cache latency, arbitrary slow persistence and crash/device-loss recovery are outside the throughput claims. Committed shaders, focused tests and documented generation commands remain sufficient for ordinary builds and correctness checks without the temporary measurement machinery.
+Further work should first measure the remaining packed sequence with reliable runtime dependency, barrier and bandwidth counters and investigate the driver-call outliers independently of submission length. The data do not justify another unrolling/radix experiment, an unbounded persistent kernel, additional submission depth, automatic CPU-core reservation or a tuning cache. The delivered design favors exact work accounting, bounded resident/backpressure state and short useful trials over an unsupported promise of a global maximum.

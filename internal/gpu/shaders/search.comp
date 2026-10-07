@@ -6,10 +6,16 @@
 #define ONINO_INITIAL_STEPS 64u
 #endif
 
+const uint prepareFirst = 0;
+const uint prepare = 1;
+const uint invertRoots = 2;
+const uint reconstruct = 3;
+const uint reconstructLast = 4;
+
 layout(local_size_x = 64) in;
 struct Affine { Field x; Field y; Field xy; };
 // All storage layouts deliberately use uint words, avoiding host ABI padding.
-struct Stream { Affine center; uint generation; uint steps; uint cursor; uint status; uint hitSteps; uint kind; uint low; uint high; };
+struct Stream { Affine center; uint generation; uint steps; uint cursor; uint status; uint hitSteps; uint kind; uint low; uint high; uint completed; Field scratch[128]; };
 struct Command { Affine center; uint expected; uint generation; uint action; };
 struct Probe { uint lowMask; uint highMask; uint lowValue; uint highValue; };
 struct Hit { uint stream; uint generation; uint steps; uint kind; uint low; uint high; };
@@ -17,7 +23,7 @@ layout(std430, binding = 0) buffer Streams { Stream streams[]; };
 layout(std430, binding = 1) readonly buffer Tables { Affine offsets[65]; Probe probes[8]; uint probeCount; };
 layout(std430, binding = 2) buffer Commands { Command commands[]; };
 layout(std430, binding = 3) buffer Results { uint count; uint checked; uint pending; uint reserved; Hit hits[]; };
-layout(push_constant) uniform Parameters { uint rounds; uint capacity; uint collectOnly; uint unused; } parameters;
+layout(push_constant) uniform Parameters { uint work; uint capacity; uint collectOnly; uint phase; } parameters;
 
 shared Field products[128];
 shared uint winner;
@@ -45,10 +51,24 @@ void publish(uint streamIndex) {
 	} else { atomicAdd(pending, 1); }
 }
 void main() {
+	// Adjacent invocations invert independent roots; the surrounding passes retain 64 lanes per stream.
+	if (parameters.phase == invertRoots) {
+		uint index = gl_GlobalInvocationID.x;
+		if (index >= parameters.work || streams[index].status != 0 || parameters.collectOnly != 0) { return; }
+		Field root = streams[index].scratch[1];
+		Field jump = streams[index].scratch[0];
+		Field combined = inverse(mul(root, jump));
+		streams[index].scratch[1] = mul(jump, combined);
+		streams[index].scratch[0] = mul(root, combined);
+		return;
+	}
 	uint streamIndex = gl_WorkGroupID.x;
 	uint lane = gl_LocalInvocationID.x;
+	uint localChecked = 0;
 	if (lane == 0) {
+		if (parameters.phase == prepareFirst) { streams[streamIndex].completed = 0; }
 		Command command = commands[streamIndex];
+		if (parameters.phase >= reconstruct) { command.action = 0; }
 		if (command.action != 0 && command.expected == streams[streamIndex].generation) {
 			if (command.action == 2) {
 				streams[streamIndex].center = command.center;
@@ -63,28 +83,33 @@ void main() {
 	}
 	memoryBarrierBuffer();
 	barrier();
-	for (uint round = 0; round < parameters.rounds && running != 0; round++) {
+	for (uint round = 0; round < parameters.work && running != 0; round++) {
 		Stream stream = streams[streamIndex];
 		Affine offset = offsets[lane];
 		Field productX = mul(stream.center.x, offset.x);
 		Field productY = mul(stream.center.y, offset.y);
 		Field mixed = mul(stream.center.xy, offset.xy);
-		products[64 + lane] = sub(small(1), square(mixed));
-		if (lane == 0) { winner = 128; }
-		barrier();
-		for (uint size = 32; size > 0; size >>= 1) {
-			if (lane < size) { products[size + lane] = mul(products[2 * (size + lane)], products[2 * (size + lane) + 1]); }
+		if (parameters.phase <= prepare) {
+			products[64 + lane] = sub(small(1), square(mixed));
+			if (lane == 0) { winner = 128; }
 			barrier();
+			for (uint size = 32; size > 0; size >>= 1) {
+				if (lane < size) { products[size + lane] = mul(products[2 * (size + lane)], products[2 * (size + lane) + 1]); }
+				barrier();
+			}
+			if (lane == 0) {
+				Field mixedJump = mul(stream.center.xy, offsets[64].xy);
+				Field denominatorJump = sub(small(1), square(mixedJump));
+				products[0] = denominatorJump;
+			}
+			barrier();
+			streams[streamIndex].scratch[lane] = products[lane];
+			streams[streamIndex].scratch[64 + lane] = products[64 + lane];
+			return;
 		}
-		if (lane == 0) {
-			Field product = products[1];
-			Field mixedJump = mul(stream.center.xy, offsets[64].xy);
-			Field denominatorJump = sub(small(1), square(mixedJump));
-			Field combined = inverse(mul(product, denominatorJump));
-			products[1] = mul(denominatorJump, combined);
-			// Node zero is outside the product tree. Paused ranges recompute it on resume.
-			products[0] = mul(product, combined);
-		}
+		products[lane] = streams[streamIndex].scratch[lane];
+		products[64 + lane] = streams[streamIndex].scratch[64 + lane];
+		if (lane == 0) { winner = 128; }
 		barrier();
 		for (uint size = 1; size < 64; size <<= 1) {
 			if (lane < size) {
@@ -112,6 +137,9 @@ void main() {
 			Field crossSecond = mul(stream.center.y, offset.x);
 			Field abscissa = (winner & 1) == 0 ? mul(add(crossFirst, crossSecond), sub(reciprocal, factor)) : mul(sub(crossFirst, crossSecond), add(reciprocal, factor));
 			matchedSign = canonical(abscissa).limb[0] & 1;
+			// A match may precede the final pass; shared memory does not survive a dispatch.
+			streams[streamIndex].scratch[2] = matchedY;
+			streams[streamIndex].scratch[3].limb[0] = matchedSign;
 #endif
 			uint64_t word = firstWord((winner & 1) == 0 ? plus : minus);
 			streams[streamIndex].low = uint(word);
@@ -121,7 +149,7 @@ void main() {
 		}
 		barrier();
 		if (lane == 0) {
-			atomicAdd(checked, min(winner + 1, 128u) - stream.cursor);
+			localChecked += min(winner + 1, 128u) - stream.cursor;
 			if (winner < 128) {
 				streams[streamIndex].cursor = winner + 1;
 				streams[streamIndex].status = 1;
@@ -149,10 +177,18 @@ void main() {
 		memoryBarrierBuffer();
 		barrier();
 	}
-	if (lane == 0) { publish(streamIndex); }
+	if (lane == 0) {
+		streams[streamIndex].completed += localChecked;
+		if (parameters.phase == reconstructLast) {
+			if (streams[streamIndex].completed != 0) { atomicAdd(checked, streams[streamIndex].completed); }
+			publish(streamIndex);
+		}
+	}
 #ifdef ONINO_DIAGNOSTIC
 	// Test-only full encoding of the selected candidate, using two ordinary record slots.
-	if (lane == 0) {
+	if (lane == 0 && parameters.phase == reconstructLast) {
+		matchedY = streams[streamIndex].scratch[2];
+		matchedSign = streams[streamIndex].scratch[3].limb[0];
 		hits[streamIndex * 2] = Hit(streams[streamIndex].hitSteps, streams[streamIndex].generation, matchedY.limb[0], matchedY.limb[1], matchedY.limb[2], matchedY.limb[3]);
 		hits[streamIndex * 2 + 1] = Hit(matchedY.limb[4], matchedY.limb[5], matchedY.limb[6], matchedY.limb[7], matchedY.limb[8], matchedY.limb[9] | (matchedSign << 25));
 		atomicAdd(count, 1);

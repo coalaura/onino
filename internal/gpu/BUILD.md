@@ -1,6 +1,6 @@
 # Building the optional Vulkan backend
 
-Normal builds require neither CGO nor Vulkan. For the GPU backend, use Go 1.27.1 or compatible PACE, a C11 compiler, and `-tags gpu`. The committed bridge includes volk and the required Vulkan headers, and Go embeds the committed SPIR-V; building an executable does not require the Vulkan SDK or a shader compiler. The resulting executable loads the system Vulkan loader and driver at runtime. Vulkan 1.3, shader 64-bit integers, compute timestamps, host-coherent storage memory, and the checked workgroup/storage limits are required.
+Normal builds require neither CGO nor Vulkan. For the GPU backend, use Go 1.27.1 or compatible PACE, a C11 compiler and `-tags gpu`. The committed bridge includes volk and the required Vulkan headers and Go embeds the committed SPIR-V; building an executable does not require the Vulkan SDK or a shader compiler. The resulting executable loads the system Vulkan loader and driver at runtime. Vulkan 1.3, shader 64-bit integers, compute timestamps, host-visible staging memory, device-local storage memory and the checked workgroup/storage limits are required. Host-coherent staging is preferred; non-coherent allocations are explicitly flushed and invalidated.
 
 On Windows, build with `builder build go --cgo --pace --dyn --no-gen -tags gpu`. Omit `--pace` for stock Go.
 
@@ -15,6 +15,8 @@ Replace `pace` with `go` for stock Go. The explicit GNU target is required with 
 GPU builds add `--gpu off|auto|<index>`, defaulting to `off`. With GPU search enabled, `--cpu 0` and `--cpu off` both disable CPU search workers; the host still performs GPU orchestration, match verification and storage. For example, `onino --gpu auto --cpu off somethingrare.` searches only on the GPU; `onino --gpu auto --cpu 1 somethingrare.` also runs one pinned CPU worker when topology information is available. `auto` prefers a capable discrete device; an explicit index follows Vulkan physical-device enumeration. Initialization errors are reported rather than silently falling back to CPU search.
 
 GPU search accepts one through eight lowercase literal base32 prefixes, each ending in a dot and containing one through 51 characters before it. Other pattern forms are rejected when GPU search is enabled. The GPU filters the first twelve characters and the host verifies the complete pattern, so longer supported prefixes remain exact. The current runtime-validated search target is the RTX 5090 on Windows; Linux cross-compilation and vendor-neutral shaders do not establish runtime support for every driver.
+
+Omitted `--gpu-streams` and `--gpu-rounds` values are calibrated with the requested CPU workers active, using completed real-search work. An explicit flag fixes that parameter; specifying both skips performance exploration while retaining bounded-work validation. Initial selection targets a ten-second total startup budget, including driver initialization. Driver calls are not interruptible. `--gpu-diagnostics` reports allocation properties, trials, same-window counters, submission costs and lifecycle timing. The ordinary progress report remains shared and four-secondly. Saved matches and calibration counts are retained across configuration changes.
 
 ## Shader generation
 
@@ -31,7 +33,7 @@ glslc --target-env=vulkan1.3 -O -DONINO_INITIAL_STEPS=4294967170u internal/gpu/s
 spirv-val --target-env vulkan1.3 internal/gpu/shaders/epoch.spv
 ```
 
-The arithmetic, full-encoding, and epoch-boundary diagnostic shaders are embedded only in correctness tests. The epoch variant changes the initial step counter to exercise exhaustion without traversing billions of candidates. Source edits require regenerating and validating the affected SPIR-V before testing. There is deliberately no automatic SDK download or shader compilation during normal builds.
+The arithmetic, full-encoding and epoch-boundary diagnostic shaders are embedded only in correctness tests. The epoch variant changes the initial step counter to exercise exhaustion without traversing billions of candidates. Source edits require regenerating and validating the affected SPIR-V before testing. There is deliberately no automatic SDK download or shader compilation during normal builds.
 
 ## Device correctness checks
 

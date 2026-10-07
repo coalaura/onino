@@ -22,24 +22,45 @@ const (
 )
 
 type Options struct {
-	Device     int
-	Validation bool
-	Streams    int
-	Rounds     int
-	Capacity   int
-	Monitor    *search.Monitor
-	// Ready runs once after device and seed setup, before the first submission.
+	Device      int
+	Validation  bool
+	Streams     int
+	Rounds      int
+	Capacity    int
+	AutoStreams bool
+	AutoRounds  bool
+	Started     time.Time
+	Monitor     *search.Monitor
+	Diagnostic  func(string)
+	Selected    func(device string, streams, rounds int, first, selected time.Duration)
+	// Ready runs once after the first useful submission has been accepted.
 	Ready func(device string)
 }
 
 type Metrics struct {
-	Device      string
-	Execution   time.Duration
-	Elapsed     time.Duration
-	Gaps        time.Duration
-	Submissions uint64
-	UploadBytes uint64
-	ReadBytes   uint64
+	Device         string
+	Execution      time.Duration
+	Elapsed        time.Duration
+	Gaps           time.Duration
+	Submissions    uint64
+	UploadBytes    uint64
+	ReadBytes      uint64
+	Copy           time.Duration
+	Record         time.Duration
+	Submit         time.Duration
+	Tail           time.Duration
+	GapTail        time.Duration
+	Recordings     uint64
+	Hits           uint64
+	Pending        uint32
+	Backlog        int
+	ReadbackBytes  uint64
+	FirstWork      time.Duration
+	Selection      time.Duration
+	StopSubmitting time.Duration
+	Drain          time.Duration
+	Streams        int
+	Rounds         int
 }
 
 type feedback struct {
@@ -135,11 +156,17 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 		options.Rounds = DefaultRounds
 	}
 
-	if options.Capacity == 0 {
-		options.Capacity = options.Streams
+	maximum := options.Streams
+
+	if options.AutoStreams {
+		maximum = MaxStreams
 	}
 
-	if options.Streams < 1 || options.Streams > MaxStreams || options.Rounds < 1 || options.Rounds > MaxRounds || options.Capacity < 1 || options.Capacity > options.Streams || options.Device < -1 {
+	if options.Capacity == 0 {
+		options.Capacity = min(maximum, 256)
+	}
+
+	if options.Streams < 1 || options.Streams > MaxStreams || options.Rounds < 1 || options.Rounds > MaxRounds || options.Capacity < 1 || options.Capacity > maximum || options.Device < -1 {
 		return stats, metrics, errors.New("invalid GPU device, stream, round or readback capacity")
 	}
 
@@ -148,18 +175,34 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 		return stats, metrics, err
 	}
 
-	table := makeTable(plan)
+	if options.Started.IsZero() {
+		options.Started = time.Now()
+	}
 
-	engine, err := openDevice(options.Device, options.Validation, options.Streams, options.Capacity, table, searchShader)
+	table := makeTable(plan)
+	allocation := maximum
+
+	if options.AutoStreams {
+		allocation = 0
+	}
+
+	engine, err := openDevice(options.Device, options.Validation, allocation, options.Capacity, table, searchShader)
 	if err != nil {
 		return stats, metrics, err
 	}
 
 	defer engine.close()
 
+	maximum = engine.streams
+
 	metrics.Device = engine.name
 
-	worker := verifier{seeds: make([]seed, options.Streams), matcher: matcher, save: save}
+	if options.Diagnostic != nil {
+		engine.diagnostics(options.Diagnostic)
+		options.Diagnostic(engine.memory())
+	}
+
+	worker := verifier{seeds: make([]seed, maximum), matcher: matcher, save: save}
 
 	options.Monitor.Observe(func() search.Stats {
 		saved := worker.saved.Load()
@@ -167,20 +210,11 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 		return search.Stats{Checked: checked.Load(), Saved: saved}
 	})
 
-	commands := make([]command, options.Streams)
-
-	for index := range worker.seeds {
-		worker.seeds[index], commands[index], err = newSeed(1)
-		if err != nil {
-			return stats, metrics, err
-		}
-	}
-
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	candidates := make(chan discovered, options.Streams)
-	refills := make(chan feedback, options.Streams)
+	candidates := make(chan discovered, maximum)
+	refills := make(chan feedback, maximum)
 	verified := make(chan error, 1)
 
 	go func() {
@@ -207,85 +241,49 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 		verified <- verifyError
 	}()
 
-	if options.Ready != nil {
-		options.Ready(metrics.Device)
+	controller := execution{
+		ctx:         workCtx,
+		options:     options,
+		engine:      engine,
+		worker:      &worker,
+		stats:       &stats,
+		metrics:     &metrics,
+		checked:     &checked,
+		commands:    make([]command, maximum),
+		candidates:  candidates,
+		refills:     refills,
+		firstUpdate: maximum,
+		lastUpdate:  maximum,
+		started:     time.Now(),
 	}
 
-	started := time.Now()
+	tuner := calibration{
+		options:    options,
+		deadline:   options.Started.Add(startupBudget),
+		maximum:    maximum,
+		acceptance: plan.acceptance(),
+		measure:    controller.measure,
+		now:        time.Now,
+	}
 
-	var (
-		inFlight    int
-		nextSlot    int
-		collectSlot int
-		pending     uint32
-	)
+	selected, err := tuner.selectInitial()
+	if err == nil {
+		metrics.Streams = selected.configuration.streams
+		metrics.Rounds = selected.configuration.rounds
+		metrics.Selection = time.Since(options.Started)
 
-	for {
-		stopping := workCtx.Err() != nil
-		if stopping {
-			options.Monitor.Stop()
+		if options.Selected != nil {
+			options.Selected(metrics.Device, metrics.Streams, metrics.Rounds, metrics.FirstWork, metrics.Selection)
 		}
 
-		if inFlight < 2 && !stopping {
-			drainRefills(refills, commands)
+		err = controller.search(selected)
+	}
 
-			err = engine.submit(nextSlot, commands, options.Rounds, false)
-			if err != nil {
-				break
-			}
+	stopped := time.Now()
+	drainError := controller.drain()
 
-			clear(commands)
-
-			metrics.Submissions++
-			metrics.UploadBytes += uint64(len(commands) * 132)
-
-			inFlight++
-			nextSlot ^= 1
-
-			continue
-		}
-
-		if inFlight == 0 {
-			if pending == 0 {
-				break
-			}
-
-			// No acknowledgements during draining: paused streams stay paused.
-			err = engine.submit(nextSlot, commands, 1, true)
-			if err != nil {
-				break
-			}
-
-			metrics.Submissions++
-			metrics.UploadBytes += uint64(len(commands) * 132)
-
-			inFlight++
-			nextSlot ^= 1
-		}
-
-		var completed collection
-
-		completed, err = engine.collect(collectSlot)
-		if err != nil {
-			break
-		}
-
-		inFlight--
-		collectSlot ^= 1
-		pending = completed.pending
-
-		stats.Checked += uint64(completed.checked)
-		checked.Store(stats.Checked)
-
-		metrics.Execution += completed.elapsed
-		metrics.Gaps += completed.gap
-		metrics.ReadBytes += uint64(16 + len(completed.hits)*24)
-
-		found := time.Now()
-
-		for _, result := range completed.hits {
-			candidates <- discovered{hit: result, found: found}
-		}
+	if err == nil {
+		err = drainError
 	}
 
 	options.Monitor.Stop()
@@ -294,7 +292,15 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 	verifyError := <-verified
 
 	stats.Saved = worker.saved.Load()
-	metrics.Elapsed = time.Since(started)
+
+	metrics.Elapsed = time.Since(controller.started)
+	metrics.Drain = time.Since(stopped)
+
+	engine.costs(&metrics)
+
+	if options.Diagnostic != nil {
+		options.Diagnostic(fmt.Sprintf("lifecycle first_work_ms=%.3f selected_ms=%.3f stopped_ms=%.3f drain_ms=%.3f recordings=%d upload_bytes=%d readback_bytes=%d", float64(metrics.FirstWork)/1e6, float64(metrics.Selection)/1e6, float64(metrics.StopSubmitting)/1e6, float64(metrics.Drain)/1e6, metrics.Recordings, metrics.UploadBytes, metrics.ReadbackBytes))
+	}
 
 	if verifyError != nil {
 		return stats, metrics, verifyError
@@ -311,13 +317,20 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 	return stats, metrics, ctx.Err()
 }
 
-func drainRefills(refills <-chan feedback, commands []command) {
+func drainUpdates(refills <-chan feedback, commands []command, first, last int) (int, int) {
 	for {
 		select {
 		case refill := <-refills:
 			commands[refill.stream] = refill.command
+
+			if first == len(commands) {
+				last = int(refill.stream) + 1
+			}
+
+			first = min(first, int(refill.stream))
+			last = max(last, int(refill.stream)+1)
 		default:
-			return
+			return first, last
 		}
 	}
 }

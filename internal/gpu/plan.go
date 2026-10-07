@@ -6,6 +6,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
+	"math/bits"
 	"strings"
 )
 
@@ -14,6 +16,40 @@ const alphabet = "abcdefghijklmnopqrstuvwxyz234567"
 type Plan struct {
 	probes [8][4]uint32
 	count  uint32
+}
+
+// Acceptance is the union of the actual GPU filters, including the twelve-character
+// truncation. Anchored literal prefixes are either disjoint or contain one another.
+func (plan Plan) acceptance() float64 {
+	probability := 0.0
+
+	for index := uint32(0); index < plan.count; index++ {
+		probe := plan.probes[index]
+		covered := false
+
+		for other := uint32(0); other < plan.count; other++ {
+			if other == index {
+				continue
+			}
+
+			parent := plan.probes[other]
+
+			contains := probe[0]&parent[0] == parent[0] && probe[1]&parent[1] == parent[1] && probe[2]&parent[0] == parent[2] && probe[3]&parent[1] == parent[3]
+			same := probe[0] == parent[0] && probe[1] == parent[1]
+
+			if contains && (!same || other < index) {
+				covered = true
+
+				break
+			}
+		}
+
+		if !covered {
+			probability += math.Ldexp(1, -bits.OnesCount32(probe[0])-bits.OnesCount32(probe[1]))
+		}
+	}
+
+	return probability
 }
 
 // Compile accepts one to eight literal anchored prefixes. Beyond twelve characters, the GPU applies a necessary filter and the host verifies the complete pattern.

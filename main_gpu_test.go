@@ -22,6 +22,8 @@ type gpuFlagCase struct {
 func TestGPUConfigurationFlags(t *testing.T) {
 	cases := []gpuFlagCase{
 		{name: "defaults", streams: 256, rounds: 4},
+		{name: "fixed streams", flags: []string{"--gpu-streams", "4096"}, streams: 4096, rounds: 4},
+		{name: "fixed rounds", flags: []string{"--gpu-rounds", "2"}, streams: 256, rounds: 2},
 		{name: "rare prefix setting", flags: []string{"--gpu-streams", "4096", "--gpu-rounds", "2"}, streams: 4096, rounds: 2},
 		{name: "minimum", flags: []string{"--gpu-streams", "1", "--gpu-rounds", "1"}, streams: 1, rounds: 1},
 		{name: "maximum", flags: []string{"--gpu-streams", "16384", "--gpu-rounds", "64"}, streams: 16384, rounds: 64},
@@ -60,6 +62,10 @@ func TestGPUConfigurationFlags(t *testing.T) {
 
 				if options.Device != -1 || options.Streams != test.streams || options.Rounds != test.rounds {
 					t.Fatalf("resolved options: %+v", options)
+				}
+
+				if options.AutoStreams == command.IsSet("gpu-streams") || options.AutoRounds == command.IsSet("gpu-rounds") {
+					t.Fatalf("explicit flags must fix only their own dimension: %+v", options)
 				}
 
 				return nil

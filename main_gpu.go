@@ -24,6 +24,8 @@ type backendResult struct {
 	err   error
 }
 
+var backendStarted = time.Now()
+
 func backendFlags(flags []cli.Flag) []cli.Flag {
 	for _, flag := range flags {
 		if cpuFlag, ok := flag.(*cli.StringFlag); ok && cpuFlag.Name == "cpu" {
@@ -36,13 +38,18 @@ func backendFlags(flags []cli.Flag) []cli.Flag {
 		Value: "off",
 		Usage: "Vulkan prefix search: off, auto, or physical device index; --cpu 0 or --cpu off selects GPU only",
 	}, &cli.IntFlag{
-		Name:  "gpu-streams",
-		Value: gpu.DefaultStreams,
-		Usage: "GPU resident streams (1-16384); requires --gpu",
+		Name:        "gpu-streams",
+		Value:       gpu.DefaultStreams,
+		DefaultText: "auto",
+		Usage:       "Fix GPU resident streams (1-16384); omitted values are calibrated during real search",
 	}, &cli.IntFlag{
-		Name:  "gpu-rounds",
-		Value: gpu.DefaultRounds,
-		Usage: "GPU rounds per dispatch (1-64); requires --gpu",
+		Name:        "gpu-rounds",
+		Value:       gpu.DefaultRounds,
+		DefaultText: "auto",
+		Usage:       "Fix GPU rounds per submission (1-64); omitted values are calibrated during real search",
+	}, &cli.BoolFlag{
+		Name:  "gpu-diagnostics",
+		Usage: "Print GPU allocation, tuning and per-second accounting diagnostics",
 	})
 }
 
@@ -143,8 +150,16 @@ func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matc
 	go func() {
 		deviceOptions.Monitor = options.Monitor
 
-		deviceOptions.Ready = func(device string) {
-			fmt.Fprintf(command.ErrWriter, "GPU %s: %d streams, %d rounds.\n", device, deviceOptions.Streams, deviceOptions.Rounds)
+		if command.Bool("gpu-diagnostics") {
+			deviceOptions.Diagnostic = func(message string) {
+				fmt.Fprintf(command.ErrWriter, "GPU diagnostic: %s\n", message)
+			}
+		}
+
+		deviceOptions.Started = backendStarted
+
+		deviceOptions.Selected = func(device string, streams, rounds int, first, selected time.Duration) {
+			fmt.Fprintf(command.ErrWriter, "GPU %s: %d streams, %d rounds (first work %.2fs; selection %.2fs).\n", device, streams, rounds, first.Seconds(), selected.Seconds())
 		}
 
 		stats, metrics, runError := gpu.Run(workCtx, plan, matcher, serializedSave, deviceOptions)
@@ -199,7 +214,7 @@ func gpuOptions(command *cli.Command) (gpu.Options, error) {
 		return gpu.Options{}, fmt.Errorf("invalid --gpu-rounds %d: expected 1-%d", rounds, gpu.MaxRounds)
 	}
 
-	return gpu.Options{Device: index, Streams: streams, Rounds: rounds}, nil
+	return gpu.Options{Device: index, Streams: streams, Rounds: rounds, AutoStreams: !command.IsSet("gpu-streams"), AutoRounds: !command.IsSet("gpu-rounds")}, nil
 }
 
 func gpuIndex(value string) (int, error) {
