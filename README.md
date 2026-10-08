@@ -6,6 +6,16 @@
 
 onino searches for vanity Tor v3 `.onion` addresses using CPU workers with optional Vulkan GPU acceleration. It matches the first **52 visible hostname characters**, saves usable service keys and keeps searching. By default it uses one CPU search worker and no GPU.
 
+## Install
+
+On Linux or macOS (amd64/arm64):
+
+```sh
+curl -fsSL https://src.ws2.sh/onino/install.sh | sh
+```
+
+Choose CPU or GPU when prompted. The installer downloads the latest release, verifies its SHA-256 checksum and installs it to `/usr/local/bin/onino` with executable permissions, using `sudo` when needed. GPU builds require a compatible [Vulkan runtime](#gpu-support).
+
 ## Build and use
 
 PACE is the primary build and release target, enabling register-ABI assembly calls and targeted inlining. Use a toolchain compatible with Go 1.27.1, as declared in `go.mod`. Ordinary builds require neither CGO nor Vulkan:
