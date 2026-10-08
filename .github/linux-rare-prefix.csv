@@ -1,0 +1,9 @@
+machine,tool,selection,backend,pattern,workers,logical_cpu,timeout_seconds,reported_candidates,count_basis,reported_elapsed_seconds,reported_million_candidates_per_second,rate_basis,progress_samples,progress_median_million_candidates_per_second,progress_min_million_candidates_per_second,progress_max_million_candidates_per_second,command
+debian-server,onino,auto,bmi2-adx,rareprefix.,1,0,60,631896064,final_exact,60.004,10.5,full_run_wall_clock,11,10.5,10.4,10.6,timeout -s INT -k 5s 1m taskset -c 0 onino rareprefix. --cpu 1
+debian-server,onionloom,default,,rareprefix,1,0,60,526211811,last_progress,,9.05,last_progress_average,30,9.04,8.73,9.05,timeout -s INT -k 5s 1m taskset -c 0 ./onionloom search rareprefix --workers 1 --gpu off
+ubuntu-vps,onino,auto,bmi2,rareprefix.,1,0,60,491003392,final_exact,60.015,8.18,full_run_wall_clock,12,8.19,7.99,8.35,timeout -s INT -k 5s 1m taskset -c 0 onino --cpu 1 rareprefix.
+ubuntu-vps,onino,forced,bmi2-adx,rareprefix.,1,0,60,510354944,final_exact,60.005,8.51,full_run_wall_clock,12,8.49,8.40,8.60,timeout -s INT -k 5s 1m taskset -c 0 onino --cpu 1 --simd bmi2-adx rareprefix.
+ubuntu-vps,onionloom,default,,rareprefix,1,0,60,415251435,last_progress,,7.15,last_progress_average,29,7.05,6.87,7.15,timeout -s INT -k 5s 1m taskset -c 0 ./onionloom search rareprefix --workers 1 --gpu off
+cachyos-laptop,onino,auto,ifma,rareprefix.,1,0,60,2730719744,final_exact,60.008,45.5,full_run_wall_clock,12,45.5,45.5,45.5,timeout -s INT -k 5s 1m taskset -c 0 onino rareprefix. --cpu 1
+cachyos-laptop,onino,forced,bmi2-adx,rareprefix.,1,0,60,992316928,final_exact,60.015,16.5,full_run_wall_clock,12,16.5,16.5,16.6,timeout -s INT -k 5s 1m taskset -c 0 onino rareprefix. --cpu 1 --simd bmi2-adx
+cachyos-laptop,onionloom,default,,rareprefix,1,0,60,703655805,last_progress,,12.09,last_progress_average,30,12.13,11.89,12.16,timeout -s INT -k 5s 1m taskset -c 0 ./onionloom search rareprefix --workers 1 --gpu off

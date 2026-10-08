@@ -124,6 +124,8 @@ CPU workers usually generate paired candidates around 256 independent affine Edw
 
 ## Benchmarks
 
+### Windows multi-worker and GPU comparison
+
 Prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 CPU workers**, an **NVIDIA GeForce RTX 5090** for CPU+GPU runs and normal key-file output. Onino CPU-only AVX2, CPU-only AVX-512 and AVX-512+GPU results are freshly measured, alongside onionloom CPU+GPU. Onionloom and mkp224o CPU-only results are retained from the previous comparison. Rates are **million candidates/second**; higher is better.
 
 <picture>
@@ -160,6 +162,41 @@ Tested versions (fresh samples: 2026-10-08; retained CPU-only competitors: 2026-
 - [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom/releases/tag/v1.0.1) - official Windows release.
 - [mkp224o v1.7.0](https://github.com/cathugger/mkp224o/releases/tag/v1.7.0) - official Windows release.
 - NVIDIA driver 616.64 for both CPU+GPU configurations.
+
+### Linux single-worker rare-prefix runs
+
+One-minute CPU-only searches on three additional machines, each using **one search worker pinned to logical CPU 0** with `taskset -c 0`. The ten-character prefix was `rareprefix` (`rareprefix.` in onino's anchored syntax). Each configuration was run once (with 20s warmup), with no matches found.
+
+- **Debian server:** Debian 12 on bare metal, Intel Xeon E5-1650 v4 @ 3.60 GHz; AVX2, BMI2 and ADX, without AVX-512 or IFMA.
+- **Ubuntu VPS:** Ubuntu 24.04.5 LTS, 4 vCores / 4 threads; guest CPU model `Intel Core Processor (Haswell, no TSX)`. It reports AVX2 and BMI2 but no ADX, AVX-512 or IFMA. Automatic selection used BMI2; the forced BMI2+ADX run successfully executed ADX despite the guest feature report. The model string does not identify the underlying physical CPU.
+- **CachyOS laptop:** HP Pavilion with an AMD Ryzen 7 7840U, connected to power with the `performance` power profile; AVX2, BMI2, ADX and AVX-512 IFMA.
+
+**Progress-report throughput: median [min-max], in million candidates/second.** Statistics use every printed progress rate, excluding startup calibration and final run summaries. Onino reports recent five-second rates; onionloom reports cumulative search averages. Onionloom's output has no per-report timestamps, so its statistics describe those displayed running averages. Ratios compare the progress-report medians; the tools' averaging windows differ.
+
+| Machine | onino selection / backend | onino | onionloom default | Median ratio |
+| --- | --- | ---: | ---: | ---: |
+| Debian server | Auto / BMI2+ADX | **10.5** [10.4-10.6] | 9.04 [8.73-9.05] | **1.16x** |
+| Ubuntu VPS | Auto / BMI2 | **8.19** [7.99-8.35] | 7.05 [6.87-7.15] | **1.16x** |
+| Ubuntu VPS | Forced / BMI2+ADX | **8.49** [8.40-8.60] | 7.05 [6.87-7.15] | **1.20x** |
+| CachyOS laptop | Auto / AVX-512 IFMA | **45.5** [45.5-45.5] | 12.13 [11.89-12.16] | **3.75x** |
+| CachyOS laptop | Forced / BMI2+ADX | **16.5** [16.5-16.6] | 12.13 [11.89-12.16] | **1.36x** |
+
+The [148 progress samples](.github/linux-rare-prefix-progress.csv) retain the printed rates and counters in report order. Medians use the mean of the middle two values for even sample counts; min-max bounds retain the full reported range. The same single onionloom run per machine supplies both comparisons where two onino backends were tested.
+
+Commands used (the VPS placed onino's flags before the pattern):
+
+```sh
+# Automatic backend on each machine:
+timeout -s INT -k 5s 1m taskset -c 0 onino rareprefix. --cpu 1
+
+# Forced BMI2+ADX on the VPS and laptop:
+timeout -s INT -k 5s 1m taskset -c 0 onino rareprefix. --cpu 1 --simd bmi2-adx
+
+# Onionloom on each machine:
+timeout -s INT -k 5s 1m taskset -c 0 ./onionloom search rareprefix --workers 1 --gpu off
+```
+
+`timeout` sent SIGINT at one minute, with a five-second kill grace. Onino's final elapsed times were 60.004-60.015 seconds, including shutdown; its binaries had GPU support disabled. Onionloom's transcript ends with an interruption message and no exact final elapsed time, so its last printed count is retained as a progress count. [Run summaries and exact commands](.github/linux-rare-prefix.csv) preserve all eight runs, the calculated progress statistics and the final reported counts and averages with their timing basis. Empty CSV fields denote unreported values. Binary versions and build commands were not supplied for these Linux runs.
 
 ## Optimization history
 
