@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    name: Build ${{ matrix.os }}/${{ matrix.arch }} (${{ matrix.variant }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -24,6 +24,26 @@ jobs:
       matrix:
         os: [windows, linux, darwin]
         arch: [amd64, arm64]
+        variant: [cpu, gpu]
+        include:
+          - os: linux
+            variant: gpu
+            # Builder targets musl by default; the Vulkan loader needs a compatible libc.
+            pre: |
+              zig_path="$(command -v zig)"
+              mv "$zig_path" "${zig_path}-original"
+              cat > "$zig_path" <<'EOF'
+              #!/usr/bin/env bash
+              arguments=()
+              for argument in "$@"; do
+                case "$argument" in
+                  *-linux-musl) argument="${argument%-musl}-gnu.2.31" ;;
+                esac
+                arguments+=("$argument")
+              done
+              exec "${BASH_SOURCE[0]}-original" "${arguments[@]}"
+              EOF
+              chmod +x "$zig_path"
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -37,8 +57,14 @@ jobs:
           os: ${{ matrix.os }}
           arch: ${{ matrix.arch }}
           pace: true
+          cgo: ${{ matrix.variant == 'gpu' }}
+          link: ${{ matrix.variant == 'gpu' && 'dynamic' || 'static' }}
           generate: false
-          output: dist/onino-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.os == 'windows' && '.exe' || '' }}
+          pre: ${{ matrix.pre || '' }}
+          output: dist/onino-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.variant }}${{ matrix.os == 'windows' && '.exe' || '' }}
+          go-flags: |
+            ${{ matrix.variant == 'gpu' && '-tags=gpu' || '' }}
+            ${{ matrix.variant == 'gpu' && matrix.os == 'linux' && '-ldflags=-linkmode=external' || '' }}
 
       - name: Sign binary
         id: sign
@@ -59,7 +85,7 @@ jobs:
       - name: Upload binary
         uses: actions/upload-artifact@v7
         with:
-          name: onino-${{ matrix.os }}-${{ matrix.arch }}
+          name: onino-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.variant }}
           path: ${{ steps.sign.outputs.path }}
           if-no-files-found: error
           retention-days: 1
