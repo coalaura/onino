@@ -162,7 +162,7 @@ func (controller *execution) collect() error {
 
 	if controller.options.Diagnostic != nil && found.Sub(controller.sampled) >= time.Second {
 		controller.engine.costs(metrics)
-		controller.options.Diagnostic(fmt.Sprintf("sample t=%.6f cpu=%d gpu=%d submissions=%d execution_ns=%d gaps_ns=%d tail_ns=%d gap_tail_ns=%d copy_ns=%d record_ns=%d submit_ns=%d copied_bytes=%d read_bytes=%d readback_bytes=%d hits=%d pending=%d backlog=%d", found.Sub(controller.started).Seconds(), controller.total()-controller.stats.Checked, controller.stats.Checked, metrics.Submissions, metrics.Execution, metrics.Gaps, metrics.Tail, metrics.GapTail, metrics.Copy, metrics.Record, metrics.Submit, metrics.UploadBytes, metrics.ReadBytes, metrics.ReadbackBytes, metrics.Hits, metrics.Pending, metrics.Backlog))
+		controller.options.Diagnostic(fmt.Sprintf("cumulative sample controller_wall_s=%.6f cpu=%d gpu=%d submissions=%d execution_ns=%d gaps_ns=%d tail_ns=%d gap_tail_ns=%d copy_ns=%d record_ns=%d submit_ns=%d copied_bytes=%d read_bytes=%d readback_bytes=%d hits=%d pending=%d backlog=%d", found.Sub(controller.started).Seconds(), controller.total()-controller.stats.Checked, controller.stats.Checked, metrics.Submissions, metrics.Execution, metrics.Gaps, metrics.Tail, metrics.GapTail, metrics.Copy, metrics.Record, metrics.Submit, metrics.UploadBytes, metrics.ReadBytes, metrics.ReadbackBytes, metrics.Hits, metrics.Pending, metrics.Backlog))
 		controller.sampled = found
 	}
 
@@ -239,9 +239,11 @@ func (controller *execution) measure(configuration configuration, duration time.
 		return observation{}, err
 	}
 
+	interval := time.Since(started)
+
 	observation := observation{
 		configuration: configuration,
-		rate:          float64(controller.total()-before) / time.Since(started).Seconds(),
+		rate:          float64(controller.total()-before) / interval.Seconds(),
 		tail:          controller.tail,
 		hits:          controller.metrics.Hits - hits,
 		checked:       controller.stats.Checked - checked,
@@ -249,7 +251,7 @@ func (controller *execution) measure(configuration configuration, duration time.
 	}
 
 	if controller.options.Diagnostic != nil {
-		controller.options.Diagnostic(fmt.Sprintf("trial streams=%d rounds=%d combined_mps=%.3f tail_ms=%.3f checked=%d hits=%d backlog=%d", configuration.streams, configuration.rounds, observation.rate/1e6, float64(observation.tail)/1e6, observation.checked, observation.hits, observation.backlog))
+		controller.options.Diagnostic(fmt.Sprintf("trial streams=%d rounds=%d combined_mps=%.3f (trial wall %.6fs, including drain) tail_ms=%.3f checked=%d hits=%d backlog=%d", configuration.streams, configuration.rounds, observation.rate/1e6, interval.Seconds(), float64(observation.tail)/1e6, observation.checked, observation.hits, observation.backlog))
 	}
 
 	if controller.tail > submissionLimit {

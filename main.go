@@ -7,14 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/urfave/cli/v3"
 
 	"github.com/coalaura/onino/internal/cpu"
 	"github.com/coalaura/onino/internal/onion"
-	"github.com/coalaura/onino/internal/pattern"
 	"github.com/coalaura/onino/internal/search"
 	"github.com/coalaura/onino/internal/simd"
 )
@@ -25,7 +23,11 @@ func main() {
 
 	err := newCommand().Run(ctx, os.Args)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		_, reported := errors.AsType[reportedError](err)
+		if !reported {
+			fmt.Fprintln(os.Stderr, err)
+		}
+
 		os.Exit(1)
 	}
 }
@@ -34,9 +36,14 @@ func newCommand() *cli.Command {
 	return &cli.Command{
 		Name:        "onino",
 		Usage:       "Continuously search for vanity v3 onion addresses",
-		ArgsUsage:   "pattern [pattern ...]",
-		Description: "Patterns match the first 52 visible lowercase base32 characters of the onion hostname.\nSuffixes end at character 52, before the final four checksum/version characters.\nForms: prefix.  .suffix  prefix.suffix  .interior.  anywhere",
+		ArgsUsage:   "[pattern ...]",
+		UsageText:   "onino --cpu all --gpu auto prefix.\n   onino --cpu all --gpu auto --patterns patterns.txt --output results",
+		Description: "Patterns match the first 52 visible lowercase base32 characters of the onion hostname.\nSuffixes end at character 52, before the final four checksum/version characters.\nForms: prefix.  .suffix  prefix.suffix  .interior.  anywhere\nGPU options require a GPU-enabled build; omit --gpu for CPU-only builds.",
 		Flags: backendFlags([]cli.Flag{
+			&cli.StringFlag{
+				Name:  "patterns",
+				Usage: "Read one pattern per line from a UTF-8 file (blank lines and # comment lines ignored)",
+			},
 			&cli.StringFlag{
 				Name:  "simd",
 				Value: "auto",
@@ -59,11 +66,28 @@ func newCommand() *cli.Command {
 }
 
 func runSearch(ctx context.Context, command *cli.Command) error {
-	if command.NArg() == 0 {
-		return errors.New("at least one pattern is required")
+	started := time.Now()
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	reporter := newPresentation(command.Writer, command.ErrWriter, started, cancel)
+
+	if command.IsSet("patterns") && command.NArg() == 0 {
+		reporter.loading(command.String("patterns"))
 	}
 
-	err := validateBackend(command)
+	input, err := resolvePatterns(command)
+	if err != nil {
+		return err
+	}
+
+	matcher, estimate, err := compileInput(input)
+	if err != nil {
+		return err
+	}
+
+	backend, err := prepareBackend(command, input)
 	if err != nil {
 		return err
 	}
@@ -72,18 +96,6 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 	if err != nil {
 		return err
 	}
-
-	matcher, err := pattern.CompilePatterns(command.Args().Slice())
-	if err != nil {
-		return err
-	}
-
-	probability, err := pattern.EstimateProbability(command.Args().Slice())
-	if err != nil {
-		return err
-	}
-
-	estimate := newMatchEstimate(probability)
 
 	topology, err := cpu.Discover()
 	if err != nil {
@@ -121,49 +133,31 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
-	fmt.Fprintf(command.ErrWriter, "Searching with %d worker(s), %s; saving matches to %s. Press Ctrl+C to stop.\n", workers, placement, output)
-
-	var progressBuffer [320]byte
-
-	command.ErrWriter.Write(appendCandidateEstimate(progressBuffer[:0], estimate))
-
-	started := time.Now()
-	lastMatch := started
-
-	var outputMutex sync.Mutex
-
-	command.Writer = serializedWriter{writer: command.Writer, mutex: &outputMutex}
-	command.ErrWriter = serializedWriter{writer: command.ErrWriter, mutex: &outputMutex}
-
 	monitor := search.NewMonitor()
-	reporter := startProgress(ctx, command.ErrWriter, estimate, monitor, started)
+
+	setup := searchSetup{
+		input:     input,
+		workers:   workers,
+		placement: placement,
+		output:    output,
+		prepared:  time.Since(started),
+		gpu:       backend.settings(),
+	}
+
+	reporter.start(ctx, setup, estimate, monitor)
 
 	options := search.Options{Workers: workers, CPUs: processors, Monitor: monitor, SIMD: mode}
 
-	stats, err := runBackend(ctx, command, matcher, func(key onion.Key, found time.Time) error {
+	totals, err := runBackend(ctx, backend, matcher, func(key onion.Key, found time.Time) error {
 		saveError := store.Save(key)
 		if saveError != nil {
 			return saveError
 		}
 
-		// Queue order across workers need not be discovery-time order.
-		matchSeconds := max(0, found.Sub(lastMatch).Seconds())
-		totalSeconds := found.Sub(started).Seconds()
-
-		fmt.Fprintf(command.Writer, "%s in %.2fs (%.2fs total)\n", key.Hostname(), matchSeconds, totalSeconds)
-
-		if found.After(lastMatch) {
-			lastMatch = found
-		}
+		reporter.saved(key, found)
 
 		return nil
-	}, options)
+	}, options, reporter)
 
-	reporter.finish(stats)
-
-	if errors.Is(err, context.Canceled) {
-		return nil
-	}
-
-	return err
+	return reporter.finish(totals, err)
 }

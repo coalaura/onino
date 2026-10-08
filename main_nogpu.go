@@ -12,12 +12,18 @@ import (
 	"github.com/coalaura/onino/internal/search"
 )
 
+type backendPlan struct{}
+
+func (backend backendPlan) settings() gpuSetup {
+	return gpuSetup{state: "unavailable (not built)"}
+}
+
 func backendFlags(flags []cli.Flag) []cli.Flag {
 	return flags
 }
 
-func validateBackend(command *cli.Command) error {
-	return nil
+func prepareBackend(command *cli.Command, input patternInput) (backendPlan, error) {
+	return backendPlan{}, nil
 }
 
 func resolveWorkers(command *cli.Command, available int) (int, error) {
@@ -32,6 +38,8 @@ func pinSingleWorker(command *cli.Command, workers int) bool {
 	return false
 }
 
-func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matcher, save search.SaveMatchFunc, options search.Options) (search.Stats, error) {
-	return search.RunQueued(ctx, matcher, save, options)
+func runBackend(ctx context.Context, backend backendPlan, matcher *pattern.Matcher, save search.SaveMatchFunc, options search.Options, reporter *presentation) (runTotals, error) {
+	totals, err := runCPU(ctx, matcher, save, options)
+
+	return runTotals{cpu: totals, gpu: backendTotals{state: backend.settings().state}}, err
 }

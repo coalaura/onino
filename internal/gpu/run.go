@@ -33,6 +33,7 @@ type Options struct {
 	Monitor     *search.Monitor
 	Diagnostic  func(string)
 	Selected    func(device string, streams, rounds int, first, selected time.Duration)
+	Initialized func(device string, initialization time.Duration)
 	// Ready runs once after the first useful submission has been accepted.
 	Ready func(device string)
 }
@@ -186,6 +187,8 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 		allocation = 0
 	}
 
+	initializing := time.Now()
+
 	engine, err := openDevice(options.Device, options.Validation, allocation, options.Capacity, table, searchShader)
 	if err != nil {
 		return stats, metrics, err
@@ -196,6 +199,10 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 	maximum = engine.streams
 
 	metrics.Device = engine.name
+
+	if options.Initialized != nil {
+		options.Initialized(metrics.Device, time.Since(initializing))
+	}
 
 	if options.Diagnostic != nil {
 		engine.diagnostics(options.Diagnostic)
@@ -299,6 +306,7 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 	engine.costs(&metrics)
 
 	if options.Diagnostic != nil {
+		options.Diagnostic(fmt.Sprintf("overall device_mps=%.3f (summed GPU execution %.6fs) backend_active_mps=%.3f (controller wall %.6fs) submissions=%d", float64(stats.Checked)/max(metrics.Execution.Seconds(), 1e-9)/1e6, metrics.Execution.Seconds(), float64(stats.Checked)/max(metrics.Elapsed.Seconds(), 1e-9)/1e6, metrics.Elapsed.Seconds(), metrics.Submissions))
 		options.Diagnostic(fmt.Sprintf("lifecycle first_work_ms=%.3f selected_ms=%.3f stopped_ms=%.3f drain_ms=%.3f recordings=%d upload_bytes=%d readback_bytes=%d", float64(metrics.FirstWork)/1e6, float64(metrics.Selection)/1e6, float64(metrics.StopSubmitting)/1e6, float64(metrics.Drain)/1e6, metrics.Recordings, metrics.UploadBytes, metrics.ReadbackBytes))
 	}
 

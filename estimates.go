@@ -2,8 +2,6 @@ package main
 
 import (
 	"math"
-	"strconv"
-	"time"
 )
 
 type matchEstimate struct {
@@ -12,11 +10,15 @@ type matchEstimate struct {
 }
 
 func newMatchEstimate(probability float64) matchEstimate {
-	if probability >= 1 {
+	if math.IsNaN(probability) || math.IsInf(probability, 0) || probability < 0 || probability > 1 {
+		return matchEstimate{candidates50: math.NaN(), candidates95: math.NaN()}
+	}
+
+	if probability == 1 {
 		return matchEstimate{candidates50: 1, candidates95: 1}
 	}
 
-	if probability <= 0 {
+	if probability == 0 {
 		return matchEstimate{candidates50: math.Inf(1), candidates95: math.Inf(1)}
 	}
 
@@ -30,57 +32,98 @@ func newMatchEstimate(probability float64) matchEstimate {
 }
 
 func appendCandidateEstimate(buffer []byte, estimate matchEstimate) []byte {
-	buffer = append(buffer, "Estimated candidates for a match: 50% ~"...)
+	buffer = append(buffer, "  Candidates  50% ~"...)
 	buffer = appendCandidateCount(buffer, estimate.candidates50)
 	buffer = append(buffer, "; 95% ~"...)
 	buffer = appendCandidateCount(buffer, estimate.candidates95)
 
-	return append(buffer, ". Wait estimates use the recent combined rate.\n"...)
+	return append(buffer, "\n  Waits estimate a new match from now at the recent combined rate.\n  Uniform-key model; overlaps accounted for, large unions approximated.\n"...)
 }
 
 func appendCandidateCount(buffer []byte, count float64) []byte {
 	if math.IsInf(count, 1) {
-		return append(buffer, "unbounded"...)
+		return append(buffer, "impossible"...)
 	}
 
-	if count >= 1e15 {
-		return strconv.AppendFloat(buffer, count, 'g', 4, 64)
-	}
-
-	var digits [32]byte
-
-	number := strconv.AppendFloat(digits[:0], count, 'f', 0, 64)
-
-	return appendGroupedDigits(buffer, number)
+	return appendCompact(buffer, count)
 }
 
-func appendWaitEstimate(buffer []byte, seconds float64) []byte {
-	if math.IsNaN(seconds) || seconds < 0 {
+func appendWait(buffer []byte, candidates, rate float64) []byte {
+	if math.IsNaN(candidates) || candidates <= 0 {
 		return append(buffer, "--"...)
 	}
 
+	if math.IsInf(candidates, 1) {
+		return append(buffer, "impossible"...)
+	}
+
+	if rate == 0 {
+		return append(buffer, "stalled"...)
+	}
+
+	if rate < 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return append(buffer, "--"...)
+	}
+
+	buffer = append(buffer, '~')
+
+	seconds := candidates / rate
+
 	if math.IsInf(seconds, 1) {
-		return append(buffer, "unbounded"...)
+		// Divide in log space only when a finite ratio exceeds float64 seconds.
+		logYears := math.Log10(candidates) - math.Log10(rate) - math.Log10(365.25*86400)
+		exponent := math.Floor(logYears)
+
+		buffer = appendCompact(buffer, math.Pow(10, logYears-exponent))
+		buffer = append(buffer, 'e')
+		buffer = appendExact(buffer, uint64(exponent))
+
+		return append(buffer, 'y')
+	}
+
+	return appendWaitEstimate(buffer, seconds)
+}
+
+func appendWaitEstimate(buffer []byte, seconds float64) []byte {
+	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 {
+		return append(buffer, "--"...)
 	}
 
 	if seconds < 1 {
 		return append(buffer, "<1s"...)
 	}
 
-	if seconds < 86400 {
-		duration := time.Duration(math.Ceil(seconds)) * time.Second
+	if seconds < 60 {
+		buffer = appendCompact(buffer, math.Ceil(seconds))
 
-		return append(buffer, duration.String()...)
+		return append(buffer, 's')
+	}
+
+	if seconds < 3600 {
+		buffer = appendCompact(buffer, seconds/60)
+
+		return append(buffer, 'm')
+	}
+
+	if seconds < 86400 {
+		buffer = appendCompact(buffer, seconds/3600)
+
+		return append(buffer, 'h')
 	}
 
 	if seconds < 365.25*86400 {
-		buffer = strconv.AppendFloat(buffer, seconds/86400, 'f', 1, 64)
+		buffer = appendCompact(buffer, seconds/86400)
 
 		return append(buffer, 'd')
 	}
 
 	// Float seconds avoid time.Duration's roughly 292-year overflow limit.
-	buffer = strconv.AppendFloat(buffer, seconds/(365.25*86400), 'g', 3, 64)
+	years := seconds / (365.25 * 86400)
+	if years >= 10000 {
+		buffer = appendScientific(buffer, years)
+	} else {
+		buffer = appendCompact(buffer, years)
+	}
 
 	return append(buffer, 'y')
 }

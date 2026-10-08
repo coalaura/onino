@@ -45,7 +45,7 @@ func TestCPUFlag(t *testing.T) {
 			t.Fatal("default did not preserve direct single-worker execution")
 		}
 
-		if wantSuccess && !strings.Contains(output.String(), "Estimated candidates for a match: 50% ~") {
+		if wantSuccess && !strings.Contains(output.String(), "Candidates  50% ~") {
 			t.Fatal("startup did not show combined match estimates")
 		}
 	}
@@ -117,11 +117,11 @@ func checkProgressIntegration(t *testing.T, flags []string, pinned bool) {
 	text := output.String()
 	t.Log(text)
 
-	if strings.Count(text, "keys/s recent") != 3 || strings.Count(text, "keys/s overall avg") != 1 {
-		t.Fatal("expected three shared periodic reports and one final summary")
+	if strings.Count(text, " | wait ") != 2 || strings.Count(text, "Stopped:") != 1 {
+		t.Fatal("expected two shared periodic reports and one final summary")
 	}
 
-	if strings.Contains(text, "NaN") || strings.Contains(text, "+Inf") || strings.Contains(text, "Checked 0 keys, saved") {
+	if strings.Contains(text, "NaN") || strings.Contains(text, "+Inf") || strings.Contains(text, "Total  0 checked") {
 		t.Fatal("invalid throughput or missing completed work")
 	}
 
@@ -129,7 +129,7 @@ func checkProgressIntegration(t *testing.T, flags []string, pinned bool) {
 		t.Fatal("mixed check requires exactly one pinned CPU search worker")
 	}
 
-	if command.String("gpu") == "auto" && strings.Count(text, "4096 streams, 2 rounds.") != 1 {
+	if command.String("gpu") == "auto" && strings.Count(text, "4096 streams (explicit), 2 rounds (explicit)") != 1 {
 		t.Fatal("expected selected GPU configuration exactly once at startup")
 	}
 }

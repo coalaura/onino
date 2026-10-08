@@ -20,11 +20,27 @@ import (
 )
 
 type backendResult struct {
-	stats search.Stats
-	err   error
+	totals backendTotals
+	gpu    bool
+	err    error
 }
 
-var backendStarted = time.Now()
+type backendPlan struct {
+	enabled     bool
+	diagnostics bool
+	plan        gpu.Plan
+	options     gpu.Options
+}
+
+func (backend backendPlan) settings() gpuSetup {
+	state := backendDisabled
+
+	if backend.enabled {
+		state = backendEnabled
+	}
+
+	return gpuSetup{state: state, autoStreams: backend.options.AutoStreams, autoRounds: backend.options.AutoRounds}
+}
 
 func backendFlags(flags []cli.Flag) []cli.Flag {
 	for _, flag := range flags {
@@ -53,21 +69,30 @@ func backendFlags(flags []cli.Flag) []cli.Flag {
 	})
 }
 
-func validateBackend(command *cli.Command) error {
+func prepareBackend(command *cli.Command, input patternInput) (backendPlan, error) {
 	if command.String("gpu") == "off" {
 		if command.IsSet("gpu-streams") || command.IsSet("gpu-rounds") {
-			return errors.New("--gpu-streams and --gpu-rounds require an enabled --gpu")
+			return backendPlan{}, errors.New("--gpu-streams and --gpu-rounds require an enabled --gpu")
 		}
 
-		return nil
+		return backendPlan{}, nil
 	}
 
-	_, err := gpuOptions(command)
+	options, err := gpuOptions(command)
 	if err != nil {
-		return err
+		return backendPlan{}, err
 	}
 
-	_, err = gpu.Compile(command.Args().Slice())
+	plan, err := gpu.Compile(input.texts)
+	if err != nil {
+		return backendPlan{}, input.describeError(err, validateGPUPatterns)
+	}
+
+	return backendPlan{enabled: true, diagnostics: command.Bool("gpu-diagnostics"), plan: plan, options: options}, nil
+}
+
+func validateGPUPatterns(texts []string) error {
+	_, err := gpu.Compile(texts)
 
 	return err
 }
@@ -93,19 +118,11 @@ func pinSingleWorker(command *cli.Command, workers int) bool {
 	return command.String("gpu") != "off" && workers == 1
 }
 
-func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matcher, save search.SaveMatchFunc, options search.Options) (search.Stats, error) {
-	if command.String("gpu") == "off" {
-		return search.RunQueued(ctx, matcher, save, options)
-	}
+func runBackend(ctx context.Context, backend backendPlan, matcher *pattern.Matcher, save search.SaveMatchFunc, options search.Options, reporter *presentation) (runTotals, error) {
+	if !backend.enabled {
+		totals, err := runCPU(ctx, matcher, save, options)
 
-	deviceOptions, err := gpuOptions(command)
-	if err != nil {
-		return search.Stats{}, err
-	}
-
-	plan, err := gpu.Compile(command.Args().Slice())
-	if err != nil {
-		return search.Stats{}, err
+		return runTotals{cpu: totals, gpu: backendTotals{state: backendDisabled}}, err
 	}
 
 	workCtx, cancel := context.WithCancel(ctx)
@@ -140,51 +157,54 @@ func runBackend(ctx context.Context, command *cli.Command, matcher *pattern.Matc
 		backends++
 
 		go func() {
-			stats, runError := search.RunQueued(workCtx, matcher, serializedSave, options)
+			totals, runError := runCPU(workCtx, matcher, serializedSave, options)
 			options.Monitor.Stop()
-			results <- backendResult{stats: stats, err: runError}
 			cancel()
+			results <- backendResult{totals: totals, err: runError}
 		}()
 	}
 
 	go func() {
+		deviceOptions := backend.options
 		deviceOptions.Monitor = options.Monitor
 
-		if command.Bool("gpu-diagnostics") {
-			deviceOptions.Diagnostic = func(message string) {
-				fmt.Fprintf(command.ErrWriter, "GPU diagnostic: %s\n", message)
-			}
+		if backend.diagnostics {
+			deviceOptions.Diagnostic = reporter.diagnostic
 		}
 
-		deviceOptions.Started = backendStarted
+		deviceOptions.Started = reporter.started
+		deviceOptions.Initialized = reporter.initializedGPU
+		deviceOptions.Ready = reporter.readyGPU
+		deviceOptions.Selected = reporter.selectedGPU
 
-		deviceOptions.Selected = func(device string, streams, rounds int, first, selected time.Duration) {
-			fmt.Fprintf(command.ErrWriter, "GPU %s: %d streams, %d rounds (first work %.2fs; selection %.2fs).\n", device, streams, rounds, first.Seconds(), selected.Seconds())
-		}
-
-		stats, metrics, runError := gpu.Run(workCtx, plan, matcher, serializedSave, deviceOptions)
+		stats, metrics, runError := gpu.Run(workCtx, backend.plan, matcher, serializedSave, deviceOptions)
 		options.Monitor.Stop()
 
-		callbacks.Lock()
+		state := backendUnavailable
 
-		if metrics.Execution > 0 {
-			fmt.Fprintf(command.ErrWriter, "\nGPU %s: %d candidates, %.3f M/s device, %.3f M/s end-to-end, %d submissions.\n", metrics.Device, stats.Checked, float64(stats.Checked)/metrics.Execution.Seconds()/1e6, float64(stats.Checked)/metrics.Elapsed.Seconds()/1e6, metrics.Submissions)
+		if metrics.Device != "" {
+			state = backendEnabled
 		}
 
-		callbacks.Unlock()
-
-		results <- backendResult{stats: stats, err: runError}
+		totals := backendTotals{stats: stats, state: state, device: metrics.Device}
 		cancel()
+
+		results <- backendResult{totals: totals, gpu: true, err: runError}
 	}()
 
 	var (
-		total    search.Stats
 		runError error
 	)
 
+	total := runTotals{cpu: backendTotals{state: backendDisabled}}
+
 	for range backends {
 		result := <-results
-		total = sumStats(total, result.stats)
+		if result.gpu {
+			total.gpu = result.totals
+		} else {
+			total.cpu = result.totals
+		}
 
 		if result.err != nil && (runError == nil || errors.Is(runError, context.Canceled)) {
 			runError = result.err
@@ -228,8 +248,4 @@ func gpuIndex(value string) (int, error) {
 	}
 
 	return index, nil
-}
-
-func sumStats(first, second search.Stats) search.Stats {
-	return search.Stats{Checked: first.Checked + second.Checked, Saved: first.Saved + second.Saved}
 }

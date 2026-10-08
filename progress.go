@@ -2,34 +2,14 @@ package main
 
 import (
 	"context"
-	"io"
-	"sync"
 	"time"
-
-	"github.com/coalaura/onino/internal/search"
 )
 
-const reportInterval = 4 * time.Second
+const reportInterval = 5 * time.Second
 
 type progressSample struct {
 	checked uint64
 	time    time.Time
-}
-
-type progressCoordinator struct {
-	monitor  *search.Monitor
-	output   io.Writer
-	estimate matchEstimate
-	started  time.Time
-	previous progressSample
-	done     chan struct{}
-	buffer   [320]byte
-}
-
-// Both CLI streams share this lock because callers may give them the same writer.
-type serializedWriter struct {
-	writer io.Writer
-	mutex  *sync.Mutex
 }
 
 func (sample progressSample) rateSince(previous progressSample) float64 {
@@ -40,11 +20,23 @@ func (sample progressSample) rateSince(previous progressSample) float64 {
 	return checkedRate(sample.checked-previous.checked, sample.time.Sub(previous.time))
 }
 
-func (reporter *progressCoordinator) run(ctx context.Context) {
+func (reporter *presentation) run(ctx context.Context) {
 	defer close(reporter.done)
 
-	ticker := time.NewTicker(reportInterval)
-	defer ticker.Stop()
+	// Anchor the first report to the full-run clock, including input preparation.
+	delay := max(0, time.Until(reporter.started.Add(reportInterval)))
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	var ticker *time.Ticker
+
+	defer func() {
+		if ticker != nil {
+			ticker.Stop()
+		}
+	}()
+
+	ticks := timer.C
 
 	for {
 		select {
@@ -52,8 +44,7 @@ func (reporter *progressCoordinator) run(ctx context.Context) {
 			return
 		case <-reporter.monitor.Done():
 			return
-		case <-ticker.C:
-			// Cancellation takes precedence even when a tick is already pending.
+		case <-ticks:
 			if ctx.Err() != nil {
 				return
 			}
@@ -64,54 +55,42 @@ func (reporter *progressCoordinator) run(ctx context.Context) {
 			default:
 			}
 
-			stats := reporter.monitor.Snapshot()
+			if ticker == nil {
+				ticker = time.NewTicker(reportInterval)
+				ticks = ticker.C
+			}
 
-			// Use the sampling time, not the ticker's possibly delayed timestamp.
-			sample := progressSample{checked: stats.Checked, time: time.Now()}
-			rate := sample.rateSince(reporter.previous)
-
-			reporter.previous = sample
-
-			elapsed := sample.time.Sub(reporter.started).Truncate(time.Second)
-
-			line := appendSearchStatus(reporter.buffer[:0], stats, elapsed, rate, reporter.estimate, false)
-			reporter.output.Write(line)
+			reporter.sample(ctx)
 		}
 	}
 }
 
-// finish joins periodic output before using the authoritative drained totals.
-func (reporter *progressCoordinator) finish(stats search.Stats) {
-	reporter.monitor.Stop()
-	<-reporter.done
+func (reporter *presentation) sample(ctx context.Context) {
+	reporter.mutex.Lock()
+	defer reporter.mutex.Unlock()
 
-	elapsed := time.Since(reporter.started)
-	rate := checkedRate(stats.Checked, elapsed)
-
-	line := appendSearchStatus(reporter.buffer[:0], stats, elapsed.Round(time.Millisecond), rate, reporter.estimate, true)
-	reporter.output.Write(line)
-}
-
-func (writer serializedWriter) Write(data []byte) (int, error) {
-	writer.mutex.Lock()
-	defer writer.mutex.Unlock()
-
-	return writer.writer.Write(data)
-}
-
-func startProgress(ctx context.Context, output io.Writer, estimate matchEstimate, monitor *search.Monitor, started time.Time) *progressCoordinator {
-	reporter := &progressCoordinator{
-		monitor:  monitor,
-		output:   output,
-		estimate: estimate,
-		started:  started,
-		previous: progressSample{checked: monitor.Snapshot().Checked, time: started},
-		done:     make(chan struct{}),
+	// A complete match or diagnostic block may have delayed this pending report.
+	if ctx.Err() != nil {
+		return
 	}
 
-	go reporter.run(ctx)
+	select {
+	case <-reporter.monitor.Done():
+		return
+	default:
+	}
 
-	return reporter
+	stats := reporter.monitor.Snapshot()
+
+	// Sampling time includes scheduling and output delays, not a ticker timestamp.
+	sample := progressSample{checked: stats.Checked, time: time.Now()}
+
+	rate := sample.rateSince(reporter.previous)
+	reporter.previous = sample
+
+	line := appendSearchStatus(reporter.buffer[:0], stats, sample.time.Sub(reporter.started), rate, reporter.estimate, reporter.phase)
+
+	reporter.write(reporter.stderr, line)
 }
 
 func checkedRate(checked uint64, elapsed time.Duration) float64 {

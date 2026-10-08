@@ -50,12 +50,12 @@ func TestEstimateStatus(t *testing.T) {
 	var buffer [320]byte
 
 	startup := string(appendCandidateEstimate(buffer[:0], estimate))
-	if !strings.Contains(startup, "50% ~23,816,355,775") || !strings.Contains(startup, "; 95% ~102,932,577,139") || !strings.Contains(startup, "recent combined rate") {
+	if !strings.Contains(startup, "50% ~23.8G") || !strings.Contains(startup, "; 95% ~103G") || !strings.Contains(startup, "recent combined rate") {
 		t.Fatalf("unexpected startup estimate: %s", startup)
 	}
 
-	line := string(appendSearchStatus(buffer[:0], stats, 40*time.Second, 25000000, estimate, false))
-	if !strings.Contains(line, "25,000,000 keys/s recent") || !strings.Contains(line, "50% 15m53s, 95% 1h8m38s") {
+	line := string(appendSearchStatus(buffer[:0], stats, 40*time.Second, 25000000, estimate, ""))
+	if !strings.Contains(line, "25M/s") || !strings.Contains(line, "50% ~15.9m / 95% ~1.14h") {
 		t.Fatalf("unexpected progress: %s", line)
 	}
 
@@ -64,22 +64,22 @@ func TestEstimateStatus(t *testing.T) {
 	stats.Checked *= 10
 	stats.Saved = 100
 
-	later := string(appendSearchStatus(buffer[:0], stats, 400*time.Second, 25000000, estimate, false))
+	later := string(appendSearchStatus(buffer[:0], stats, 400*time.Second, 25000000, estimate, ""))
 
-	_, wait, _ := strings.Cut(line, "; est.")
-	_, laterWait, _ := strings.Cut(later, "; est.")
+	_, wait, _ := strings.Cut(line, " | wait ")
+	_, laterWait, _ := strings.Cut(later, " | wait ")
 
 	if wait != laterWait {
 		t.Fatalf("elapsed work incorrectly shortened the wait: %s vs %s", wait, laterWait)
 	}
 
-	zero := string(appendSearchStatus(buffer[:0], search.Stats{}, 0, 0, estimate, false))
-	if !strings.Contains(zero, "50% --, 95% --") {
+	zero := string(appendSearchStatus(buffer[:0], search.Stats{}, 0, 0, estimate, ""))
+	if !strings.Contains(zero, "50% stalled / 95% stalled") {
 		t.Fatal(zero)
 	}
 
-	final := string(appendSearchStatus(buffer[:0], stats, time.Minute, 100, estimate, true))
-	if strings.Contains(final, "wait") || !strings.Contains(final, "saved 100 matches") || !strings.Contains(final, "100 keys/s overall avg") {
+	final := string(appendBackendSummary(buffer[:0], "Total", backendTotals{stats: search.Stats{Checked: 6000}}, time.Minute))
+	if strings.Contains(final, "wait") || !strings.Contains(final, "6,000 checked") || !strings.Contains(final, "100 keys/s avg") {
 		t.Fatal(final)
 	}
 }
@@ -93,7 +93,7 @@ func TestEstimateFormattingAndAllocations(t *testing.T) {
 	}
 
 	got = string(appendWaitEstimate(buffer[:0], 2*86400))
-	if got != "2.0d" {
+	if got != "2d" {
 		t.Fatal(got)
 	}
 
@@ -108,8 +108,8 @@ func TestEstimateFormattingAndAllocations(t *testing.T) {
 
 	allocations := testing.AllocsPerRun(100, func() {
 		appendCandidateEstimate(buffer[:0], estimate)
-		appendSearchStatus(buffer[:0], stats, time.Hour, 25000000, estimate, false)
-		appendSearchStatus(buffer[:0], stats, time.Hour, 25000000, estimate, true)
+		appendSearchStatus(buffer[:0], stats, time.Hour, 25000000, estimate, "")
+		appendSearchStatus(buffer[:0], stats, time.Hour, 25000000, estimate, "tuning")
 	})
 
 	if allocations != 0 {

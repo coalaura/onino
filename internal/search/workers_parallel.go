@@ -28,6 +28,8 @@ type Options struct {
 	Progress func(Stats)
 	Monitor  *Monitor
 	SIMD     simd.Mode
+	// Ready runs once when the first queued/parallel worker is initialized.
+	Ready func()
 }
 
 // The unused tail separates live counters even when the allocation itself is
@@ -56,6 +58,7 @@ type parallelRun struct {
 	callbacks sync.Mutex
 	failure   sync.Mutex
 	stopped   atomic.Bool
+	ready     sync.Once
 	err       error
 }
 
@@ -147,6 +150,10 @@ func (run *parallelRun) work(index int) {
 		run.fail(fmt.Errorf("initialize worker %d: %w", index+1, err))
 
 		return
+	}
+
+	if run.options.Ready != nil {
+		run.ready.Do(run.options.Ready)
 	}
 
 	save := run.saveKey

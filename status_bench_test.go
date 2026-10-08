@@ -21,7 +21,7 @@ func BenchmarkSearchStatus(b *testing.B) {
 	b.ReportAllocs()
 
 	for b.Loop() {
-		line := appendSearchStatus(buffer[:0], stats, elapsed, 23000000, estimate, false)
+		line := appendSearchStatus(buffer[:0], stats, elapsed, 23000000, estimate, "")
 
 		benchmarkStatusSize = len(line)
 	}
