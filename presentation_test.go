@@ -13,6 +13,7 @@ import (
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/search"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 type lifecycleCase struct {
@@ -109,6 +110,43 @@ func TestFinalLifecycleAndBackendIdentity(t *testing.T) {
 	}
 }
 
+func TestForcedSetupDetection(t *testing.T) {
+	var output bytes.Buffer
+
+	reporter := newPresentation(&output, &output, time.Now(), func() {})
+
+	reporter.setup = searchSetup{
+		input:     patternInput{texts: []string{"rare."}},
+		workers:   1,
+		placement: "OS placement",
+		config: search.Configuration{
+			Requested: simd.BMI2ADX,
+			Engine:    simd.BMI2ADX,
+			Scalar:    simd.BMI2ADX,
+			Features:  simd.Features{Known: true, AVX2: true, BMI2: true},
+			Matching:  "scalar prefix",
+		},
+		gpu: gpuSetup{state: backendDisabled},
+	}
+
+	reporter.printSetup()
+	reporter.printSetup()
+
+	text := output.String()
+
+	wants := []string{"AVX2, BMI2; ADX not reported", "scalar (bmi2+adx), forced; paired", "scalar prefix", "forced backend not reported usable; execution may fault"}
+
+	for _, want := range wants {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q: %s", want, text)
+		}
+	}
+
+	if strings.Count(text, "Search setup") != 1 || strings.Count(text, "Warning") != 1 || strings.Contains(text, "Checksum") {
+		t.Fatalf("duplicate or fictitious execution reporting: %s", text)
+	}
+}
+
 func TestExactFinalTotalsAndSharedAverages(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var output bytes.Buffer
@@ -176,6 +214,7 @@ func TestSetupDoesNotDumpPatterns(t *testing.T) {
 	}
 
 	reporter := newPresentation(&output, &output, time.Now(), func() {})
+
 	reporter.setup = searchSetup{input: patternInput{texts: texts, file: "many patterns.txt"}, output: "results", gpu: gpuSetup{state: backendDisabled}}
 	reporter.printSetup()
 

@@ -12,7 +12,44 @@ import (
 	"time"
 
 	"github.com/coalaura/onino/internal/search"
+	"github.com/coalaura/onino/internal/simd"
 )
+
+func TestForcedSetupPrecedesGPUInitialization(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var output bytes.Buffer
+
+		reporter := newPresentation(&output, &output, time.Now(), func() {})
+
+		setup := searchSetup{
+			workers: 1,
+			gpu:     gpuSetup{state: backendEnabled},
+			config: search.Configuration{
+				Requested: simd.BMI2ADX,
+				Engine:    simd.BMI2ADX,
+				Features:  simd.Features{Known: true, BMI2: true},
+				Matching:  "scalar prefix",
+			},
+		}
+
+		reporter.start(context.Background(), setup, matchEstimate{}, search.NewMonitor())
+
+		text := output.String()
+
+		warning := strings.Index(text, "forced backend not reported usable")
+		if warning < 0 || warning > strings.Index(text, "Initializing GPU") || !strings.Contains(text, "scalar (bmi2+adx), forced") {
+			t.Fatalf("forced choice was deferred until GPU selection: %s", text)
+		}
+
+		reporter.selectedGPU("Test GPU", 256, 4, time.Second, 2*time.Second)
+		reporter.finish(runTotals{}, context.Canceled)
+
+		text = output.String()
+		if strings.Count(text, "Search setup") != 1 || strings.Count(text, "Warning") != 1 || !strings.Contains(text, "GPU selected: Test GPU, 256 streams, 4 rounds") {
+			t.Fatalf("selection duplicated setup or lost GPU settings: %s", text)
+		}
+	})
+}
 
 func TestTuningLifecycle(t *testing.T) {
 	modes := []string{"automatic", "manual", "cancelled"}

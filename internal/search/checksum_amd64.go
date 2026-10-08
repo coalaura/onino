@@ -18,7 +18,7 @@ func (state *generator) searchChecksumBatch(matcher *pattern.Matcher, save SaveF
 				continue
 			}
 
-			completeSign(&state.points[index], &state.products[index], &state.publicKeys[index])
+			completeSignWith(&state.points[index], &state.products[index], &state.publicKeys[index], state.fieldMode)
 		}
 
 		if !matcher.MatchChecksum(state.publicKeys[index]) {

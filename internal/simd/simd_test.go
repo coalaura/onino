@@ -3,17 +3,16 @@ package simd
 import "testing"
 
 func TestPolicy(t *testing.T) {
-	features := detect(AVX2, func() registers {
-		t.Fatal("avx2 mode must not query AVX-512 capabilities")
+	valid := []string{"auto", "portable", "bmi2", "bmi2-adx", "ifma"}
 
-		return registers{}
-	})
-
-	if features != (Features{}) {
-		t.Fatal(features)
+	for index, value := range valid {
+		mode, err := Parse(value)
+		if err != nil || mode != Mode(index) || mode.String() != value {
+			t.Fatalf("%s: %v, %v", value, mode, err)
+		}
 	}
 
-	invalid := []string{"", "AUTO", "avx512", "avx", "avx2 "}
+	invalid := []string{"", "AUTO", "avx512", "avx", "avx2", "avx2 ", "bmi2_adx", "generic"}
 
 	for _, value := range invalid {
 		_, err := Parse(value)
@@ -37,7 +36,7 @@ func TestRequiredFeatures(t *testing.T) {
 		missing := full
 		missing.xcr0 &^= 1 << bit
 
-		if decode(missing) != (Features{}) {
+		if decode(missing).IFMA || decode(missing).Keccak {
 			t.Fatalf("accepted missing XCR0 bit %d", bit)
 		}
 	}
@@ -46,7 +45,7 @@ func TestRequiredFeatures(t *testing.T) {
 		missing := full
 		missing.leaf1 &^= 1 << bit
 
-		if decode(missing) != (Features{}) {
+		if decode(missing).IFMA || decode(missing).Keccak {
 			t.Fatalf("accepted missing leaf1 bit %d", bit)
 		}
 	}
@@ -58,7 +57,7 @@ func TestRequiredFeatures(t *testing.T) {
 		missing.leaf7b &^= 1 << bit
 
 		features := decode(missing)
-		if bit == 16 && features != (Features{}) || bit == 21 && features.IFMA || bit == 31 && features.VL || bit == 17 && features.DQ || bit == 30 && features.BW {
+		if bit == 16 && (features.IFMA || features.Keccak) || bit == 21 && features.IFMA || bit == 31 && features.VL || bit == 17 && features.DQ || bit == 30 && features.BW {
 			t.Fatalf("accepted missing leaf7 bit %d", bit)
 		}
 	}
@@ -72,11 +71,35 @@ func TestRequiredFeatures(t *testing.T) {
 
 	full.maximum = 6
 
-	if decode(full) != (Features{}) {
+	if decode(full) != (Features{Known: true}) {
 		t.Fatal("accepted unavailable leaf7")
 	}
 }
 
 func TestHostFeatures(t *testing.T) {
-	t.Logf("AVX-512 capabilities: %+v", Detect(Auto))
+	t.Logf("CPU capabilities: %+v", Detect())
+}
+
+func TestScalarFeaturesWithoutVectorState(t *testing.T) {
+	value := registers{maximum: 7, leaf7b: 1<<5 | 1<<8 | 1<<19 | 1<<21}
+
+	features := decode(value)
+	if !features.BMI2 || !features.ADX || features.AVX2 || features.IFMA || features.Keccak || !features.AVX2CPU || !features.IFMACPU {
+		t.Fatalf("incorrect independent detection: %+v", features)
+	}
+
+	value.leaf7b &^= 1 << 19
+
+	features = decode(value)
+	if !features.BMI2 || features.ADX {
+		t.Fatal("BMI2 incorrectly depends on ADX")
+	}
+
+	value.leaf1 = 1<<26 | 1<<27 | 1<<28
+	value.xcr0 = 6
+
+	features = decode(value)
+	if !features.AVX2 || features.IFMA {
+		t.Fatal("AVX2 incorrectly depends on AVX-512 state")
+	}
 }

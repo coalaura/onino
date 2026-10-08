@@ -3,6 +3,8 @@ package search
 import (
 	"filippo.io/edwards25519"
 	"filippo.io/edwards25519/field"
+
+	"github.com/coalaura/onino/internal/simd"
 )
 
 type extendedPoint struct {
@@ -30,6 +32,11 @@ func (point *extendedPoint) set(source *edwards25519.Point) {
 
 //go:inline
 func (point *extendedPoint) advance() {
+	point.advanceWith(defaultFieldMode)
+}
+
+//go:inline
+func (point *extendedPoint) advanceWith(mode simd.Mode) {
 	// Complete mixed Edwards addition, with the fixed affine point 8*B.
 	// Precomputing its three products removes the general-point conversion
 	// and one multiplication from every addition (seven multiplies total).
@@ -46,10 +53,10 @@ func (point *extendedPoint) advance() {
 
 	plus.add(&point.yCoordinate, &point.xCoordinate)
 	minus.subtract(&point.yCoordinate, &point.xCoordinate)
-	plus.multiply(&plus, &searchStep.yPlusX)
-	minus.multiply(&minus, &searchStep.yMinusX)
+	plus.multiplyWith(&plus, &searchStep.yPlusX, mode)
+	minus.multiplyWith(&minus, &searchStep.yMinusX, mode)
 
-	cross.multiply(&point.tCoordinate, &searchStep.xy2D)
+	cross.multiplyWith(&point.tCoordinate, &searchStep.xy2D, mode)
 	doubledZ.add(&point.zCoordinate, &point.zCoordinate)
 	difference.subtract(&plus, &minus)
 	sum.add(&plus, &minus)
@@ -57,10 +64,10 @@ func (point *extendedPoint) advance() {
 	lower.subtract(&doubledZ, &cross)
 	upper.add(&doubledZ, &cross)
 
-	point.xCoordinate.multiply(&difference, &lower)
-	point.yCoordinate.multiply(&sum, &upper)
-	point.zCoordinate.multiply(&lower, &upper)
-	point.tCoordinate.multiply(&difference, &sum)
+	point.xCoordinate.multiplyWith(&difference, &lower, mode)
+	point.yCoordinate.multiplyWith(&sum, &upper, mode)
+	point.zCoordinate.multiplyWith(&lower, &upper, mode)
+	point.tCoordinate.multiplyWith(&difference, &sum, mode)
 }
 
 func generatePoints(points []extendedPoint, products []fieldElement, publicKeys [][32]byte) {
@@ -68,10 +75,14 @@ func generatePoints(points []extendedPoint, products []fieldElement, publicKeys 
 }
 
 func generateBatch(points []extendedPoint, products []fieldElement, publicKeys [][32]byte, deferSign bool) {
+	generateBatchWith(points, products, publicKeys, deferSign, defaultFieldMode)
+}
+
+func generateBatchWith(points []extendedPoint, products []fieldElement, publicKeys [][32]byte, deferSign bool, mode simd.Mode) {
 	// Montgomery's trick: one inversion for the entire batch, with 3*(n-1)
 	// extra multiplications. Accumulate products while advancing each point
 	// to avoid a separate strided pass over the coordinates.
-	advanceBatch(points, products)
+	advanceBatchWith(points, products, mode)
 
 	var (
 		reciprocal fieldElement
@@ -82,7 +93,15 @@ func generateBatch(points []extendedPoint, products []fieldElement, publicKeys [
 
 	reciprocal.invert(&products[len(points)-1])
 
-	if deferSign && fastFieldAvailable {
+	if deferSign && mode == simd.BMI2 {
+		last := len(points) - 1
+
+		normalizeBMI2Only(&points[last], &products[last], &publicKeys[last], len(points), &reciprocal)
+
+		return
+	}
+
+	if deferSign && mode == simd.BMI2ADX {
 		last := len(points) - 1
 
 		normalizeBMI2(&points[last], &products[last], &publicKeys[last], len(points), &reciprocal)
@@ -96,11 +115,11 @@ func generateBatch(points []extendedPoint, products []fieldElement, publicKeys [
 		if index == 0 {
 			inverseZ = reciprocal
 		} else {
-			inverseZ.multiply(&reciprocal, &products[index-1])
-			reciprocal.multiply(&reciprocal, &point.zCoordinate)
+			inverseZ.multiplyWith(&reciprocal, &products[index-1], mode)
+			reciprocal.multiplyWith(&reciprocal, &point.zCoordinate, mode)
 		}
 
-		affineY.multiply(&point.yCoordinate, &inverseZ)
+		affineY.multiplyWith(&point.yCoordinate, &inverseZ, mode)
 		affineY.putBytes(&publicKeys[index])
 
 		if deferSign {
@@ -111,27 +130,35 @@ func generateBatch(points []extendedPoint, products []fieldElement, publicKeys [
 			continue
 		}
 
-		affineX.multiply(&point.xCoordinate, &inverseZ)
+		affineX.multiplyWith(&point.xCoordinate, &inverseZ, mode)
 
 		publicKeys[index][31] |= affineX.isNegative() << 7
 	}
 }
 
 func completeSign(point *extendedPoint, inverseZ *fieldElement, publicKey *[32]byte) {
+	completeSignWith(point, inverseZ, publicKey, defaultFieldMode)
+}
+
+func completeSignWith(point *extendedPoint, inverseZ *fieldElement, publicKey *[32]byte, mode simd.Mode) {
 	var affineX fieldElement
 
-	affineX.multiply(&point.xCoordinate, inverseZ)
+	affineX.multiplyWith(&point.xCoordinate, inverseZ, mode)
 
 	publicKey[31] = publicKey[31]&0x7f | affineX.isNegative()<<7
 }
 
 func advanceBatchGeneric(points []extendedPoint, products []fieldElement) {
-	points[0].advance()
+	advanceBatchGenericWith(points, products, defaultFieldMode)
+}
+
+func advanceBatchGenericWith(points []extendedPoint, products []fieldElement, mode simd.Mode) {
+	points[0].advanceWith(mode)
 	products[0] = points[0].zCoordinate
 
 	for index := 1; index < len(points); index++ {
-		points[index].advance()
-		products[index].multiply(&products[index-1], &points[index].zCoordinate)
+		points[index].advanceWith(mode)
+		products[index].multiplyWith(&products[index-1], &points[index].zCoordinate, mode)
 	}
 }
 

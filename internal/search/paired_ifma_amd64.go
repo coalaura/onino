@@ -10,6 +10,7 @@ import (
 
 	"filippo.io/edwards25519"
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 type ifmaAffine struct {
@@ -41,6 +42,7 @@ type ifmaGenerator struct {
 	sink       matchSink
 	plan       pattern.PrefixPlan
 	masks      [pairedCenters / ifmaLanes]uint16
+	fieldMode  simd.Mode
 }
 
 func (state *ifmaGenerator) reseed(index int) error {
@@ -84,6 +86,10 @@ func (state *ifmaGenerator) reseed(index int) error {
 }
 
 func (state *ifmaGenerator) reset() error {
+	if state.fieldMode == simd.Auto {
+		state.fieldMode = defaultFieldMode
+	}
+
 	state.position = 0
 	state.cursor = batchSize
 
@@ -107,7 +113,7 @@ func (state *ifmaGenerator) prepare(offset *pairedAffine) {
 		factor  ifmaElement
 	)
 
-	ifmaHybridInverse(&inverse, &state.scratch[len(state.scratch)-1].product)
+	ifmaHybridInverseWith(&inverse, &state.scratch[len(state.scratch)-1].product, state.fieldMode)
 	ifmaReverse(&state.scratch, &inverse, &factor)
 }
 
@@ -286,19 +292,19 @@ func (state *ifmaGenerator) completeSign(index int) {
 	first := center.x.lane(lane)
 	second := center.y.lane(lane)
 
-	first.multiply(&first, &offset.y)
-	second.multiply(&second, &offset.x)
+	first.multiplyWith(&first, &offset.y, state.fieldMode)
+	second.multiplyWith(&second, &offset.x, state.fieldMode)
 
 	if index&1 == 0 {
 		inverse := scratch.minusInverse.lane(lane)
 
 		first.add(&first, &second)
-		first.multiply(&first, &inverse)
+		first.multiplyWith(&first, &inverse, state.fieldMode)
 	} else {
 		inverse := scratch.plusInverse.lane(lane)
 
 		first.subtract(&first, &second)
-		first.multiply(&first, &inverse)
+		first.multiplyWith(&first, &inverse, state.fieldMode)
 	}
 
 	state.publicKeys[index][31] = state.publicKeys[index][31]&0x7f | first.isNegative()<<7
@@ -372,7 +378,7 @@ func broadcastIFMA(source *fieldElement) ifmaElement {
 	return result
 }
 
-func ifmaHybridInverse(result, source *ifmaElement) {
+func ifmaHybridInverseWith(result, source *ifmaElement, mode simd.Mode) {
 	var (
 		values   [ifmaLanes]fieldElement
 		products [ifmaLanes]fieldElement
@@ -384,7 +390,7 @@ func ifmaHybridInverse(result, source *ifmaElement) {
 		if lane == 0 {
 			products[lane] = values[lane]
 		} else {
-			products[lane].multiply(&products[lane-1], &values[lane])
+			products[lane].multiplyWith(&products[lane-1], &values[lane], mode)
 		}
 	}
 
@@ -399,8 +405,8 @@ func ifmaHybridInverse(result, source *ifmaElement) {
 		if lane == 0 {
 			reciprocal = inverse
 		} else {
-			reciprocal.multiply(&inverse, &products[lane-1])
-			inverse.multiply(&inverse, &values[lane])
+			reciprocal.multiplyWith(&inverse, &products[lane-1], mode)
+			inverse.multiplyWith(&inverse, &values[lane], mode)
 		}
 
 		result.setLane(lane, &reciprocal)

@@ -6,6 +6,54 @@ import (
 	"github.com/coalaura/onino/internal/onion"
 )
 
+// MatchingEngine describes the compiled matcher, independently of arithmetic.
+func (matcher *Matcher) MatchingEngine() string {
+	if matcher.usesVectorMatching() {
+		return "AVX2 scan + scalar verification"
+	}
+
+	if matcher.PrefixPlan().Count != 0 {
+		return "scalar prefix"
+	}
+
+	if matcher.kind == matcherSuffix {
+		return "scalar suffix"
+	}
+
+	return "scalar"
+}
+
+func (matcher *Matcher) usesVectorMatching() bool {
+	if matcher == nil {
+		return false
+	}
+
+	if len(matcher.scans) != 0 {
+		return true
+	}
+
+	if matcher.signFilter != nil && matcher.signFilter != matcher && matcher.signFilter.usesVectorMatching() {
+		return true
+	}
+
+	if matcher.boundary == nil {
+		return false
+	}
+
+	boundary := matcher.boundary
+	if boundary.body.usesVectorMatching() || boundary.filter.usesVectorMatching() {
+		return true
+	}
+
+	for _, check := range boundary.checks {
+		if check.usesVectorMatching() {
+			return true
+		}
+	}
+
+	return false
+}
+
 // UsesChecksum identifies workers that can benefit from immediate SHA3.
 func (matcher *Matcher) UsesChecksum() bool {
 	return matcher.kind == matcherBoundary || matcher.kind == matcherSuffix

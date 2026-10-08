@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 type worker struct {
@@ -32,10 +33,14 @@ func (state *worker) searchBatch(matcher *pattern.Matcher, save SaveFunc, stats 
 }
 
 func newWorker(random io.Reader, matcher *pattern.Matcher) (*worker, error) {
+	return newScalarWorker(random, matcher.PreferIndependent(), defaultFieldMode)
+}
+
+func newScalarWorker(random io.Reader, independent bool, mode simd.Mode) (*worker, error) {
 	// Pairing amortizes misses. Very frequent matchers instead benefit from
 	// one independent seed per candidate and projective reseeding.
-	if matcher.PreferIndependent() {
-		state := &generator{random: random}
+	if independent {
+		state := &generator{random: random, fieldMode: mode}
 
 		err := state.reset()
 		if err != nil {
@@ -45,7 +50,7 @@ func newWorker(random io.Reader, matcher *pattern.Matcher) (*worker, error) {
 		return &worker{walk: state}, nil
 	}
 
-	state := &pairedGenerator{random: random}
+	state := &pairedGenerator{random: random, fieldMode: mode}
 
 	err := state.reset()
 	if err != nil {

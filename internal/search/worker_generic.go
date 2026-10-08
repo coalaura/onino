@@ -6,7 +6,11 @@ import (
 	"io"
 
 	"github.com/coalaura/onino/internal/pattern"
-	"github.com/coalaura/onino/internal/simd"
+)
+
+const (
+	vectorAssemblyAvailable = false
+	ifmaNeedsVL             = false
 )
 
 type acceleratedWorker struct{}
@@ -17,6 +21,6 @@ func (state *acceleratedWorker) searchBatch(matcher *pattern.Matcher, save SaveF
 
 func (state *acceleratedWorker) setSink(sink matchSink) {}
 
-func newWorkerWithSIMD(random io.Reader, matcher *pattern.Matcher, features simd.Features) (*worker, error) {
-	return newWorker(random, matcher)
+func newWorkerWithConfig(random io.Reader, matcher *pattern.Matcher, config Configuration) (*worker, error) {
+	return newScalarWorker(random, config.Independent, config.Scalar)
 }

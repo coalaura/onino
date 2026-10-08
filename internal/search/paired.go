@@ -10,6 +10,7 @@ import (
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 const (
@@ -44,6 +45,7 @@ type pairedGenerator struct {
 	position   int
 	cursor     int
 	sink       matchSink
+	fieldMode  simd.Mode
 }
 
 var (
@@ -65,7 +67,7 @@ func (point *pairedAffine) set(source *edwards25519.Point) {
 
 	point.x.setField(xCoordinate)
 	point.y.setField(yCoordinate)
-	point.xy.multiply(&point.x, &point.y)
+	multiplyGeneric(&point.xy, &point.x, &point.y)
 }
 
 func (state *pairedGenerator) reseed(index int) error {
@@ -102,6 +104,10 @@ func (state *pairedGenerator) reseed(index int) error {
 }
 
 func (state *pairedGenerator) reset() error {
+	if state.fieldMode == simd.Auto {
+		state.fieldMode = defaultFieldMode
+	}
+
 	state.position = 0
 	state.cursor = batchSize
 
@@ -138,13 +144,13 @@ func (state *pairedGenerator) advanceCenters() error {
 			cross     fieldElement
 		)
 
-		numerator.multiply(&center.x, &pairedJump.y)
-		cross.multiply(&pairedJump.x, &center.y)
+		numerator.multiplyWith(&center.x, &pairedJump.y, state.fieldMode)
+		cross.multiplyWith(&pairedJump.x, &center.y, state.fieldMode)
 		numerator.add(&numerator, &cross)
-		center.x.multiply(&numerator, &scratch.minusInverse)
+		center.x.multiplyWith(&numerator, &scratch.minusInverse, state.fieldMode)
 		numerator.add(&scratch.b, &scratch.a)
-		center.y.multiply(&numerator, &scratch.plusInverse)
-		center.xy.multiply(&center.x, &center.y)
+		center.y.multiplyWith(&numerator, &scratch.plusInverse, state.fieldMode)
+		center.xy.multiplyWith(&center.x, &center.y, state.fieldMode)
 
 		state.steps[index] += 2*pairedOffsets + 1
 	}
@@ -153,7 +159,18 @@ func (state *pairedGenerator) advanceCenters() error {
 }
 
 func (state *pairedGenerator) prepare(offset *pairedAffine) {
-	if fastFieldAvailable {
+	if state.fieldMode == simd.BMI2 {
+		pairedPrepareBMI2Only(&state.centers[0], &state.scratch[0], offset)
+
+		var inverse fieldElement
+
+		inverse.invert(&state.scratch[pairedCenters-1].product)
+		pairedInverseBMI2Only(&state.scratch[pairedCenters-1], &inverse)
+
+		return
+	}
+
+	if state.fieldMode == simd.BMI2ADX {
 		pairedPrepareBMI2(&state.centers[0], &state.scratch[0], offset)
 
 		var inverse fieldElement
@@ -171,17 +188,17 @@ func (state *pairedGenerator) prepare(offset *pairedAffine) {
 		center := &state.centers[index]
 		scratch := &state.scratch[index]
 
-		scratch.a.multiply(&center.x, &offset.x)
-		scratch.b.multiply(&center.y, &offset.y)
-		scratch.c.multiply(&center.xy, &offset.xy)
+		multiplyGeneric(&scratch.a, &center.x, &offset.x)
+		multiplyGeneric(&scratch.b, &center.y, &offset.y)
+		multiplyGeneric(&scratch.c, &center.xy, &offset.xy)
 
-		scratch.denominator.square(&scratch.c)
+		multiplyGeneric(&scratch.denominator, &scratch.c, &scratch.c)
 		scratch.denominator.subtract(&pairedOne, &scratch.denominator)
 
 		if index == 0 {
 			product = scratch.denominator
 		} else {
-			product.multiply(&product, &scratch.denominator)
+			multiplyGeneric(&product, &product, &scratch.denominator)
 		}
 
 		scratch.product = product
@@ -201,11 +218,11 @@ func (state *pairedGenerator) prepare(offset *pairedAffine) {
 		if index == 0 {
 			reciprocal = inverse
 		} else {
-			reciprocal.multiply(&inverse, &state.scratch[index-1].product)
-			inverse.multiply(&inverse, &scratch.denominator)
+			multiplyGeneric(&reciprocal, &inverse, &state.scratch[index-1].product)
+			multiplyGeneric(&inverse, &inverse, &scratch.denominator)
 		}
 
-		factor.multiply(&scratch.c, &reciprocal)
+		multiplyGeneric(&factor, &scratch.c, &reciprocal)
 		scratch.plusInverse.add(&reciprocal, &factor)
 		scratch.minusInverse.subtract(&reciprocal, &factor)
 	}
@@ -235,10 +252,10 @@ func (state *pairedGenerator) nextBatch() error {
 		)
 
 		numerator.add(&scratch.b, &scratch.a)
-		ordinate.multiply(&numerator, &scratch.plusInverse)
+		ordinate.multiplyWith(&numerator, &scratch.plusInverse, state.fieldMode)
 		ordinate.putBytes(&state.publicKeys[index*2])
 		numerator.subtract(&scratch.b, &scratch.a)
-		ordinate.multiply(&numerator, &scratch.minusInverse)
+		ordinate.multiplyWith(&numerator, &scratch.minusInverse, state.fieldMode)
 		ordinate.putBytes(&state.publicKeys[index*2+1])
 	}
 
@@ -255,15 +272,15 @@ func (state *pairedGenerator) completeSign(index int) {
 		second fieldElement
 	)
 
-	first.multiply(&center.x, &offset.y)
-	second.multiply(&center.y, &offset.x)
+	first.multiplyWith(&center.x, &offset.y, state.fieldMode)
+	second.multiplyWith(&center.y, &offset.x, state.fieldMode)
 
 	if index&1 == 0 {
 		first.add(&first, &second)
-		first.multiply(&first, &scratch.minusInverse)
+		first.multiplyWith(&first, &scratch.minusInverse, state.fieldMode)
 	} else {
 		first.subtract(&first, &second)
-		first.multiply(&first, &scratch.plusInverse)
+		first.multiplyWith(&first, &scratch.plusInverse, state.fieldMode)
 	}
 
 	state.publicKeys[index][31] = state.publicKeys[index][31]&0x7f | first.isNegative()<<7
@@ -358,7 +375,7 @@ func makePairedTable() [pairedOffsets]pairedAffine {
 		point.Add(point, step)
 
 		table[index].set(point)
-		table[index].xy.multiply(&table[index].xy, &pairedD)
+		multiplyGeneric(&table[index].xy, &table[index].xy, &pairedD)
 	}
 
 	return table
@@ -377,7 +394,7 @@ func makePairedJump() pairedAffine {
 
 	result.set(point)
 
-	result.xy.multiply(&result.xy, &pairedD)
+	multiplyGeneric(&result.xy, &result.xy, &pairedD)
 
 	return result
 }

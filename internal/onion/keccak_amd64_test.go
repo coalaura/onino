@@ -10,7 +10,7 @@ import (
 )
 
 func TestKeccakImmediate(t *testing.T) {
-	if !simd.Detect(simd.Auto).Keccak {
+	if !simd.Detect().Keccak {
 		t.Skip("AVX-512F unavailable")
 	}
 

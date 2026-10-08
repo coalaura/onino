@@ -47,7 +47,7 @@ func newCommand() *cli.Command {
 			&cli.StringFlag{
 				Name:  "simd",
 				Value: "auto",
-				Usage: "Optional SIMD: auto or avx2 (disable all onino AVX-512 paths)",
+				Usage: "CPU arithmetic: auto, portable, bmi2, bmi2-adx or ifma (explicit choices override detection)",
 			},
 			&cli.StringFlag{
 				Name:  "cpu",
@@ -97,6 +97,11 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		return err
 	}
 
+	config, err := search.Resolve(mode, matcher)
+	if err != nil {
+		return err
+	}
+
 	topology, err := cpu.Discover()
 	if err != nil {
 		return err
@@ -142,11 +147,12 @@ func runSearch(ctx context.Context, command *cli.Command) error {
 		output:    output,
 		prepared:  time.Since(started),
 		gpu:       backend.settings(),
+		config:    config,
 	}
 
 	reporter.start(ctx, setup, estimate, monitor)
 
-	options := search.Options{Workers: workers, CPUs: processors, Monitor: monitor, SIMD: mode}
+	options := search.Options{Workers: workers, CPUs: processors, Monitor: monitor, SIMD: mode, Config: &config}
 
 	totals, err := runBackend(ctx, backend, matcher, func(key onion.Key, found time.Time) error {
 		saveError := store.Save(key)

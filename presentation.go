@@ -19,6 +19,7 @@ type searchSetup struct {
 	output    string
 	prepared  time.Duration
 	gpu       gpuSetup
+	config    search.Configuration
 }
 
 // presentation owns both streams and all lifecycle output. Its lock serializes
@@ -72,6 +73,11 @@ func (reporter *presentation) start(ctx context.Context, setup searchSetup, esti
 
 	if setup.gpu.state == backendEnabled {
 		reporter.phase = "GPU init"
+
+		if setup.workers != 0 && setup.config.Forced() {
+			reporter.printSetup()
+		}
+
 		reporter.write(reporter.stderr, []byte("Initializing GPU...\n"))
 	} else {
 		reporter.printSetup()
@@ -177,6 +183,36 @@ func (reporter *presentation) printSetup() {
 		line = append(line, "  CPU         disabled\n"...)
 	} else {
 		line = fmt.Appendf(line, "  CPU         %d worker(s), %s\n", setup.workers, setup.placement)
+	}
+
+	line = fmt.Appendf(line, "  Features    %s\n", setup.config.Features)
+	line = fmt.Appendf(line, "  Build       %s\n", search.BuildDescription())
+
+	if setup.workers == 0 {
+		line = fmt.Appendf(line, "  Engine      inactive (--simd=%s)\n", setup.config.Requested)
+	} else {
+		selection := "auto"
+
+		if setup.config.Forced() {
+			selection = "forced"
+		}
+
+		line = fmt.Appendf(line, "  Engine      %s, %s; %s\n", setup.config.Arithmetic(), selection, setup.config.Generator())
+		line = fmt.Appendf(line, "  Matching    %s\n", setup.config.Matching)
+
+		if setup.config.NeedsChecksum {
+			checksum := "Go SHA3"
+
+			if setup.config.Checksum {
+				checksum = "AVX-512F Keccak"
+			}
+
+			line = fmt.Appendf(line, "  Checksum    %s\n", checksum)
+		}
+
+		if setup.config.Forced() && !setup.config.Supported() {
+			line = append(line, "  Warning     forced backend not reported usable; execution may fault.\n"...)
+		}
 	}
 
 	line = append(line, "  GPU         "...)

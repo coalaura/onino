@@ -1,7 +1,6 @@
 package search
 
 import (
-	"errors"
 	"io"
 	"os"
 
@@ -11,25 +10,19 @@ import (
 
 func benchmarkSIMDWorker(random io.Reader, matcher *pattern.Matcher) (*worker, error) {
 	mode := os.Getenv("ONINO_BENCH_BACKEND")
-	if mode != "auto" && mode != "avx2" && mode != "keccak" {
-		return newWorker(random, matcher)
+	if mode == "" {
+		mode = "auto"
 	}
 
-	selected := simd.Auto
-
-	if mode == "avx2" {
-		selected = simd.AVX2
+	selected, err := simd.Parse(mode)
+	if err != nil {
+		return nil, err
 	}
 
-	features := simd.Detect(selected)
-
-	if mode == "keccak" {
-		if !features.Keccak {
-			return nil, errors.New("AVX-512F unavailable")
-		}
-
-		features.IFMA = false
+	config, err := Resolve(selected, matcher)
+	if err != nil {
+		return nil, err
 	}
 
-	return newWorkerWithSIMD(random, matcher, features)
+	return newWorkerWithConfig(random, matcher, config)
 }

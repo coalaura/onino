@@ -5,6 +5,8 @@ import (
 	"math/bits"
 
 	"filippo.io/edwards25519/field"
+
+	"github.com/coalaura/onino/internal/simd"
 )
 
 // Four full-width limbs represent a residue modulo 2^255-19. Arithmetic may
@@ -49,18 +51,34 @@ func (result *fieldElement) subtract(left, right *fieldElement) {
 
 //go:inline
 func (result *fieldElement) multiply(left, right *fieldElement) {
-	if fastFieldAvailable {
+	result.multiplyWith(left, right, defaultFieldMode)
+}
+
+//go:inline
+func (result *fieldElement) multiplyWith(left, right *fieldElement, mode simd.Mode) {
+	switch mode {
+	case simd.BMI2ADX:
 		multiplyBMI2(result, left, right)
-	} else {
+	case simd.BMI2:
+		multiplyBMI2Only(result, left, right)
+	default:
 		multiplyGeneric(result, left, right)
 	}
 }
 
 //go:inline
 func (result *fieldElement) square(source *fieldElement) {
-	if fastFieldAvailable {
+	result.squareWith(source, defaultFieldMode)
+}
+
+//go:inline
+func (result *fieldElement) squareWith(source *fieldElement, mode simd.Mode) {
+	switch mode {
+	case simd.BMI2ADX:
 		squareBMI2(result, source)
-	} else {
+	case simd.BMI2:
+		squareBMI2Only(result, source)
+	default:
 		multiplyGeneric(result, source, source)
 	}
 }

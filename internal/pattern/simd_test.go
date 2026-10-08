@@ -8,7 +8,7 @@ import (
 )
 
 func TestSIMDChecksumSelection(t *testing.T) {
-	features := simd.Detect(simd.Auto)
+	features := simd.Detect()
 	if !features.Keccak {
 		t.Skip("AVX-512F unavailable")
 	}

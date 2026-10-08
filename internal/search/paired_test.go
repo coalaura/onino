@@ -15,6 +15,7 @@ import (
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 func TestPairedFormula(t *testing.T) {
@@ -71,6 +72,18 @@ func TestPairedFormula(t *testing.T) {
 }
 
 func TestPairedReciprocals(t *testing.T) {
+	for _, mode := range executableModes() {
+		if mode == simd.IFMA {
+			continue
+		}
+
+		t.Run(mode.String(), func(t *testing.T) {
+			checkPairedReciprocals(t, mode)
+		})
+	}
+}
+
+func checkPairedReciprocals(t *testing.T, mode simd.Mode) {
 	prime := new(big.Int).Lsh(big.NewInt(1), 255)
 	prime.Sub(prime, big.NewInt(19))
 
@@ -84,7 +97,7 @@ func TestPairedReciprocals(t *testing.T) {
 		{0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff, 0xffffffffffffffff},
 	}
 
-	state := new(pairedGenerator)
+	state := &pairedGenerator{fieldMode: mode}
 
 	offset := pairedAffine{xy: pairedOne}
 

@@ -203,7 +203,8 @@ func BenchmarkSIMDSearch(b *testing.B) {
 
 			var stats Stats
 
-			if os.Getenv("ONINO_BENCH_BACKEND") == "auto" || os.Getenv("ONINO_BENCH_BACKEND") == "avx2" {
+			_, modeErr := simd.Parse(os.Getenv("ONINO_BENCH_BACKEND"))
+			if modeErr == nil || os.Getenv("ONINO_BENCH_BACKEND") == "" {
 				state, createErr := benchmarkSIMDWorker(sha3.NewSHAKE256(), matcher)
 				if createErr != nil {
 					b.Fatal(createErr)
@@ -281,7 +282,7 @@ func simdSearchCases() []benchmarkCase {
 func testIFMAGenerator(t testing.TB) *ifmaGenerator {
 	t.Helper()
 
-	features := simd.Detect(simd.Auto)
+	features := simd.Detect()
 	if !features.IFMA || ifmaLanes == 4 && !features.VL {
 		t.Skip("IFMA unavailable")
 	}

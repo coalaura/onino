@@ -9,7 +9,6 @@ import (
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
-	"github.com/coalaura/onino/internal/simd"
 )
 
 const saveQueueCapacity = 64
@@ -121,8 +120,12 @@ func RunQueued(ctx context.Context, matcher *pattern.Matcher, save SaveMatchFunc
 		return Stats{}, err
 	}
 
-	features := simd.Detect(options.SIMD)
-	hooks := secureHooks(features)
+	config, err := options.resolve(matcher)
+	if err != nil {
+		return Stats{}, err
+	}
+
+	hooks := secureHooks(config)
 
 	return runQueued(ctx, matcher, save, options, hooks)
 }

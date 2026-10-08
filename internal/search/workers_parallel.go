@@ -28,6 +28,7 @@ type Options struct {
 	Progress func(Stats)
 	Monitor  *Monitor
 	SIMD     simd.Mode
+	Config   *Configuration
 	// Ready runs once when the first queued/parallel worker is initialized.
 	Ready func()
 }
@@ -199,7 +200,7 @@ func RunWithOptions(ctx context.Context, matcher *pattern.Matcher, save SaveFunc
 		return Stats{}, err
 	}
 
-	if options.Workers == 1 && len(options.CPUs) == 0 && options.Monitor == nil {
+	if options.Workers == 1 && len(options.CPUs) == 0 && options.Monitor == nil && options.Config == nil {
 		return runWithSIMD(ctx, matcher, save, options.Progress, options.SIMD)
 	}
 
@@ -208,8 +209,12 @@ func RunWithOptions(ctx context.Context, matcher *pattern.Matcher, save SaveFunc
 		return Stats{}, err
 	}
 
-	features := simd.Detect(options.SIMD)
-	hooks := secureHooks(features)
+	config, err := options.resolve(matcher)
+	if err != nil {
+		return Stats{}, err
+	}
+
+	hooks := secureHooks(config)
 
 	return runParallel(ctx, matcher, save, options, hooks)
 }
@@ -283,10 +288,10 @@ func createSecureWorker(_ int, matcher *pattern.Matcher) (*worker, error) {
 	return newWorker(rand.Reader, matcher)
 }
 
-func secureHooks(features simd.Features) parallelHooks {
+func secureHooks(config Configuration) parallelHooks {
 	return parallelHooks{
 		create: func(_ int, matcher *pattern.Matcher) (*worker, error) {
-			return newWorkerWithSIMD(rand.Reader, matcher, features)
+			return newWorkerWithConfig(rand.Reader, matcher, config)
 		},
 		pin:      cpu.Pin,
 		interval: progressInterval,
@@ -294,7 +299,7 @@ func secureHooks(features simd.Features) parallelHooks {
 }
 
 func validateOptions(options Options) error {
-	if options.SIMD != simd.Auto && options.SIMD != simd.AVX2 {
+	if options.SIMD > simd.IFMA {
 		return errors.New("invalid SIMD mode")
 	}
 

@@ -11,7 +11,7 @@ import (
 )
 
 func TestIFMAArithmetic(t *testing.T) {
-	features := simd.Detect(simd.Auto)
+	features := simd.Detect()
 	if !features.IFMA || ifmaLanes == 4 && !features.VL {
 		t.Skip("IFMA unavailable")
 	}
@@ -127,7 +127,7 @@ func TestIFMAArithmetic(t *testing.T) {
 }
 
 func BenchmarkIFMAPrimitive(b *testing.B) {
-	features := simd.Detect(simd.Auto)
+	features := simd.Detect()
 	if !features.IFMA || ifmaLanes == 4 && !features.VL {
 		b.Skip("IFMA unavailable")
 	}

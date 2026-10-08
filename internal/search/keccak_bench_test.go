@@ -14,7 +14,7 @@ func BenchmarkSIMDChecksum(b *testing.B) {
 	b.ReportAllocs()
 
 	if os.Getenv("ONINO_BENCH_BACKEND") == "keccak" {
-		if !simd.Detect(simd.Auto).Keccak {
+		if !simd.Detect().Keccak {
 			b.Skip("AVX-512F unavailable")
 		}
 

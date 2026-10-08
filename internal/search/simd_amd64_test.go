@@ -16,6 +16,15 @@ import (
 	"github.com/coalaura/onino/internal/simd"
 )
 
+func newWorkerWithSIMD(random io.Reader, matcher *pattern.Matcher, features simd.Features) (*worker, error) {
+	config, err := resolveConfiguration(simd.Auto, matcher, features, scalarAssemblyAvailable, vectorAssemblyAvailable)
+	if err != nil {
+		return nil, err
+	}
+
+	return newWorkerWithConfig(random, matcher, config)
+}
+
 func TestSIMDSelection(t *testing.T) {
 	patterns := []string{"somethingrare.", ".a", ".aa"}
 
@@ -25,7 +34,7 @@ func TestSIMDSelection(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		features := simd.Detect(simd.Auto)
+		features := simd.Detect()
 
 		state, err := newWorkerWithSIMD(sha3.NewSHAKE256(), matcher, features)
 		if err != nil {
@@ -59,9 +68,9 @@ func TestSIMDSelection(t *testing.T) {
 			}
 		}
 
-		state, err = newWorkerWithSIMD(sha3.NewSHAKE256(), matcher, simd.Detect(simd.AVX2))
+		state, err = newWorkerWithSIMD(sha3.NewSHAKE256(), matcher, simd.Features{})
 		if err != nil || state.accelerated != nil {
-			t.Fatalf("forced avx2: %v", err)
+			t.Fatalf("no reported capabilities: %v", err)
 		}
 
 		features.IFMA = false
@@ -78,7 +87,7 @@ func TestSIMDSelection(t *testing.T) {
 }
 
 func TestSIMDChecksumWorkers(t *testing.T) {
-	features := simd.Detect(simd.Auto)
+	features := simd.Detect()
 	if !features.Keccak {
 		t.Skip("AVX-512 checksum unavailable")
 	}
@@ -243,7 +252,7 @@ func TestIFMAEpochAndErrors(t *testing.T) {
 }
 
 func FuzzIFMA(f *testing.F) {
-	features := simd.Detect(simd.Auto)
+	features := simd.Detect()
 	if !features.IFMA || ifmaLanes == 4 && !features.VL {
 		f.Skip("IFMA unavailable")
 	}

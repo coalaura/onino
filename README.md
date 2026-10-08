@@ -38,7 +38,7 @@ On Windows, build with `pace build -o onino.exe .` and invoke `./onino.exe`. Sto
 | Option | Default | Values and behavior |
 | --- | --- | --- |
 | `--cpu` | `1` | Positive decimal worker count up to the process's available logical CPUs or `all`. With GPU search enabled, `0` or `off` disables CPU search workers. |
-| `--simd` | `auto` | `auto` selects supported CPU acceleration; `avx2` disables onino's optional AVX-512 paths. Both retain the binary's compilation baseline and existing fallbacks. |
+| `--simd` | `auto` | `auto`, `portable`, `bmi2`, `bmi2-adx` or `ifma`; explicit choices override arithmetic/generator detection. See [CPU backends](#cpu-backends). |
 | `--output`, `-o` | `matches` | Destination directory for saved matches. |
 | `--patterns` | None | UTF-8 pattern-file path; see syntax below. |
 | `--gpu` + | `off` | `off`, `auto` or a nonnegative Vulkan physical-device index. `auto` prefers a capable discrete GPU. |
@@ -55,9 +55,33 @@ Patterns use lowercase `a-z2-7`. A suffix ends at visible character 52: `.aaa` p
 
 Supply positional patterns **or** `--patterns`, never both. A file contains one pattern per line, for example `hello.` and `onino.` on separate lines. Surrounding whitespace, blank lines and lines whose first non-whitespace character is `#` are ignored; inline comments are not supported. An initial UTF-8 BOM and CRLF line endings are accepted. Empty/comment-only files are rejected; errors in individual patterns identify the file and physical line. Setup reports the input count and source instead of dumping large lists; duplicate entries still count toward that input count.
 
-Startup presents one selected-setup block on stderr, including input source/count, CPU/GPU configuration, startup timing and output location. A single-line progress report every **five seconds** shows elapsed time, combined checked work, recent throughput, successful saves and estimated waits **from now** for a 50%/95% chance of a match. Estimates account for overlapping patterns and checksum constraints but assume independent uniform candidates; they are guidance, not deadlines. Intermediate counters are approximate.
+Startup presents one selected-setup block on stderr, including input source/count, detected CPU features, compiled backends, the actual arithmetic/generator and matching/checksum selections, CPU/GPU configuration, startup timing and output location. The engine is marked `auto` or `forced`; a forced choice is not presented as detected support. A single-line progress report every **five seconds** shows elapsed time, combined checked work, recent throughput, successful saves and estimated waits **from now** for a 50%/95% chance of a match. Estimates account for overlapping patterns and checksum constraints but assume independent uniform candidates; they are guidance, not deadlines. Intermediate counters are approximate.
 
 The search continues until Ctrl+C or an error. Cancellation stops new work at backend boundaries and drains accepted work and saves; frequent matches or slow storage can delay shutdown. One final stderr block gives exact CPU, GPU and total counts. All final **overall averages use the same full-run wall time**, from search-action entry before input preparation through accepted-save drainage and backend teardown, rather than backend-active time. Successful saves go to stdout with the hostname, time since the previous discovery and elapsed time at discovery; saving delays do not inflate these timestamps and out-of-order discoveries use a zero inter-match interval.
+
+## CPU backends
+
+| `--simd` | Arithmetic label | Selection |
+| --- | --- | --- |
+| `auto` | Depends on selection | Checks CPU capabilities, OS vector-state support, compiled implementations and workload suitability. |
+| `portable` | `go (generic)` | Forces generic Go field arithmetic. |
+| `bmi2` | `scalar (bmi2)` | Forces four-limb MULX arithmetic with ordinary ADD/ADC carries, including on ADX-capable CPUs. |
+| `bmi2-adx` | `scalar (bmi2+adx)` | Forces the existing BMI2+ADX arithmetic. |
+| `ifma` | `avx512 (ifma)` | Forces the AVX-512 IFMA paired generator, even for workloads where independent walks are usually faster. |
+
+Every explicit choice is an unconditional execution override. Missing reported CPU features or OS vector state do not block it: **a forced unsupported backend may terminate with an illegal-instruction fault**, through normal OS/runtime handling, without retrying another backend. A warning is printed when detection disagrees. Forcing does not enable hardware features or OS register state. Backends absent from the binary are rejected, including native backends in ARM64 or `purego` builds. The former `avx2` value is no longer accepted.
+
+Arithmetic selection is independent of matching and checksum acceleration. `portable` selects generic field arithmetic; it is neither a `purego` binary nor a prohibition on optimized instructions elsewhere. Scalar modes retain the same detected matching/checksum choices. IFMA can fuse prefix filtering into generation and uses a separately resolved scalar backend for hybrid inversion/sign recovery. Startup labels describe selected paths: BMI2 arithmetic and scalar prefix matching are not called AVX2 just because AVX2 is available. With CPU search disabled, the engine is reported inactive.
+
+For example, an automatically selected BMI2-only CPU can report:
+
+```text
+CPU         1 worker(s), OS placement
+Features    AVX2, BMI2; ADX not reported
+Build       amd64: portable, bmi2, bmi2-adx, ifma
+Engine      scalar (bmi2), auto; paired
+Matching    scalar prefix
+```
 
 ## GPU support
 
@@ -100,7 +124,7 @@ CPU workers usually generate paired candidates around 256 independent affine Edw
 
 ## Benchmarks
 
-Prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 CPU workers**, an **NVIDIA GeForce RTX 5090** for CPU+GPU runs, and normal key-file output. Onino CPU-only AVX2, CPU-only AVX-512 and AVX-512+GPU results are freshly measured, alongside onionloom CPU+GPU. Onionloom and mkp224o CPU-only results are retained from the previous comparison. Rates are **million candidates/second**; higher is better.
+Prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 CPU workers**, an **NVIDIA GeForce RTX 5090** for CPU+GPU runs and normal key-file output. Onino CPU-only AVX2, CPU-only AVX-512 and AVX-512+GPU results are freshly measured, alongside onionloom CPU+GPU. Onionloom and mkp224o CPU-only results are retained from the previous comparison. Rates are **million candidates/second**; higher is better.
 
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/prefix-comparison.svg">
@@ -128,7 +152,7 @@ Prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 CPU workers
 
 Each configuration has five samples per workload, run sequentially with all 32 logical CPUs available. The original comparison rotated tool order; fresh samples were collected in configuration blocks with some alternating runs. Timed windows lasted approximately 20-22 seconds after warm-up, bounded by progress reports; fresh samples used approximately 20-second windows after at least 15 seconds of warm-up, excluding GPU setup and automatic tuning. Rates use cumulative candidate-count deltas over measured wall time, not peak displayed rates. Onino's current progress counters are rounded to three significant digits, so its derived rates include that quantization. Multiple prefixes match any listed prefix. The 13-character `somethingrare` prefix produced **zero matches and zero key files in every run**, isolating search throughput from match-saving I/O. [Raw samples](.github/prefix-comparison.csv) are available.
 
-Onino CPU-only runs used `--cpu all --gpu off`, with `--simd avx2` for AVX2 and the default `--simd auto` for AVX-512 on this host. Its CPU+GPU runs used `--cpu all --gpu auto` with automatic SIMD (AVX-512) and default GPU workload tuning. Onionloom CPU+GPU used `--workers 32 --gpu force --continuous`: `--gpu auto` declines GPU use for some of these prefixes, so forced GPU mode ensures every combined sample actually used both backends. Retained onionloom CPU-only samples used `--gpu off`; mkp224o used `-t 32`.
+These historical onino CPU-only runs used `--cpu all --gpu off`, with the now-removed `--simd avx2` ceiling for the chart's "AVX2" series and default `--simd auto` for AVX-512 on this host. The former scalar series actually used BMI2+ADX arithmetic; the chart label does not identify an AVX2 arithmetic backend. Its CPU+GPU runs used `--cpu all --gpu auto` with automatic SIMD (AVX-512) and default GPU workload tuning. Onionloom CPU+GPU used `--workers 32 --gpu force --continuous`: `--gpu auto` declines GPU use for some of these prefixes, so forced GPU mode ensures every combined sample actually used both backends. Retained onionloom CPU-only samples used `--gpu off`; mkp224o used `-t 32`.
 
 Tested versions (fresh samples: 2026-10-08; retained CPU-only competitors: 2026-10-06):
 

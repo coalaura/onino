@@ -42,6 +42,12 @@ func (reporter *presentation) selectedGPU(device string, streams, rounds int, fi
 	reporter.setup.gpu.first = first
 	reporter.setup.gpu.selection = selected
 	reporter.phase = ""
+
+	if reporter.configured {
+		line := fmt.Appendf(reporter.buffer[:0], "GPU selected: %s, %d streams, %d rounds\n", device, streams, rounds)
+		reporter.write(reporter.stderr, line)
+	}
+
 	reporter.printSetup()
 }
 

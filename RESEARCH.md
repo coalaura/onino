@@ -28,7 +28,7 @@ Times are elapsed measurements. `ns/key` means nanoseconds per checked candidate
 
 ## Current architecture and development map
 
-At startup, onino compiles immutable matching plans, estimates match probability and selects an engine and supported native kernels. Selective workloads use paired affine generation with deferred sign recovery. Frequent short-pattern workloads use independent projective walks to reduce reseeding costs. The scalar implementation uses four-limb field arithmetic; eligible machines can select eight-lane AVX-512 IFMA (integer fused multiply-add) arithmetic, canonical prefix filtering and an independently dispatched immediate checksum kernel. Dispatch occurs outside candidate loops and only the selected generator state is allocated.
+At startup, onino compiles immutable matching plans, estimates match probability and resolves an execution configuration separately from detected capabilities. Automatic selection checks support; explicit `--simd` choices override detection. Selective workloads use paired affine generation with deferred sign recovery. Automatic selection uses independent projective walks for frequent short-pattern workloads to reduce reseeding costs. The scalar implementation uses generic Go, BMI2-only or BMI2+ADX four-limb arithmetic; eligible machines can select eight-lane AVX-512 IFMA (integer fused multiply-add) arithmetic, canonical prefix filtering and an independently dispatched immediate checksum kernel. Fused batch dispatch occurs outside candidate loops and only the selected generator state is allocated. [BMI2-only arithmetic and explicit selection](#bmi2-only-arithmetic-and-explicit-selection) records the current policy and local comparison.
 
 One unpinned worker retains a direct execution path. Multiple workers own their seeds, candidate state, scratch and counters, publish bounded progress updates and use discovered topology for placement. The CLI now hands owned matches to a bounded saver queue; synchronous library APIs remain available. Exact matching, saved-key independence and successful-save accounting apply to both paths.
 
@@ -45,6 +45,7 @@ The following map anchors the development narrative. It is not a common benchmar
 | Bounded saving queue | `c0ebb42` → `1d11813` | Production comparison of synchronous and queued saving, still pre-AVX-512 |
 | Optional AVX-512 | `7bca9a8` → `35b17e5` | One-worker evidence only |
 | Fused paired generation/filtering | `e743e57666d31ea963bcfbd66fa186708853181e` → `1c2f274` | Follow-up to AVX-512, with unresolved small control regressions |
+| BMI2-only arithmetic and explicit selection | Preserved `56d8ff7eb8e147b605cc812afaa2e27c9d09311b` → current implementation | Pinned local comparison; no Haswell or remote validation |
 
 Earlier bounded screens do not always record a complete protocol or exact source identifier. Missing details are identified as limits, not inferred from later studies. In particular, the old suffix and all-hit results below must not be pooled with visible-character-52 results and the historical multicore rates do not measure the AVX-512 implementation.
 
@@ -80,7 +81,7 @@ The 256 centers share one inversion of the product of `1-c²`. Both reconstructe
 
 These denominators are nonzero for valid affine points over this field: `a` is a square and `d` is a nonsquare, the complete twisted-Edwards addition case. Tests include identity order-two/order-four points, positive/negative offsets and independently multiplied search keys. The field-character assumptions are also checked with `math/big`.
 
-Write `M`, `S` and `I` for field multiplication, squaring and inversion. One pair costs approximately **9M+1S**, plus **I/256 pairs**: three cached-coordinate products, one square, three multiplications for batch inversion, one shared reciprocal product and two Y products. The batch endpoints save three multiplications overall. This is 4.5M+0.5S per generated candidate before byte serialization and matching; sign recovery adds 3M only for filter survivors. BMI2/ADX denominator preparation uses a dedicated square; portable squaring uses multiplication.
+Write `M`, `S` and `I` for field multiplication, squaring and inversion. One pair costs approximately **9M+1S**, plus **I/256 pairs**: three cached-coordinate products, one square, three multiplications for batch inversion, one shared reciprocal product and two Y products. The batch endpoints save three multiplications overall. This is 4.5M+0.5S per generated candidate before byte serialization and matching; sign recovery adds 3M only for filter survivors. Both BMI2-only and BMI2+ADX denominator preparation use dedicated squaring; portable squaring uses multiplication.
 
 Every 64 offsets, centers advance by `129.8B`, sharing another inversion. A transition costs approximately 12M+1S per center, amortized across 128 candidates. Full-search timings include these transitions, sign completion, statistics, copying saved keys, discarded relatives and independent reseeding. Reseeding includes entropy acquisition, SHA-512, clamping/headroom checks, base multiplication, affine normalization and rebuilding the cached product.
 
@@ -491,6 +492,87 @@ The amd64 leaves reuse the four-limb BMI2/ADX multiply core. PACE's natural argu
 
 BMI2/ADX arithmetic dispatch is independent of AVX2 matcher dispatch. The original SIMD ceiling was AVX2, requiring CPU, OSXSAVE and XGETBV support. The [optional AVX-512 extension](#optional-avx-512-acceleration) preserves those implementations and the compilation baseline. `purego` selects real portable arithmetic and matching, not an assembly-backed simulation.
 
+### BMI2-only arithmetic and explicit selection
+
+#### Motivation, implementation and dispatch
+
+The supplied Haswell VPS observations exposed a dispatch gap: BMI2 without ADX fell through to generic Go arithmetic. The user's approximately 3.57M keys/s onino versus 7.15M onionloom pinned comparison, 6.23M onionloom unpinned follow-up and 10.4M versus 9M Broadwell bare-metal comparison are external context, not measurements reproduced here. Onionloom's paired loop uses custom four-limb arithmetic with `u128` intermediates; attributing that comparison to dalek's five-limb field representation would be misleading. This study used only the local development machine and did not run onionloom or access either remote host.
+
+The retained BMI2-only implementation keeps onino's four full-width limbs and reduction modulo `2^255-19`. Multiplication uses MULX with ordinary ADD/ADC carry propagation; a row's product plus existing limb plus incoming carry is below `2^128`. Reduction folds the upper 256 bits by 38, folds the bounded final overflow again, then corrects a possible wrap by another 38. Dedicated squaring computes six cross-products once, doubles them including the high carry and adds four diagonals. All input limbs are consumed before output stores, including the noncanonical top bit, preserving left/right/both aliases.
+
+The new core is expanded into fused paired preparation, reverse reciprocal reconstruction, independent-walk advancement and normalization. It shares those algorithms' assembly bodies with the existing ADX implementation, avoiding per-multiply calls inside the fused passes. Remaining scalar operations receive the worker's resolved enum rather than consulting global feature flags or using an interface/function-pointer abstraction. The existing ADX multiply/square and IFMA algorithms are retained. PACE register-ABI leaves preserve R14 and X15 and remain zero-frame, call-free routines; stock Go uses its ordinary assembly adapters. Expanded instruction listings for all six BMI2-only leaves contain MULX/ADD/ADC and no ADCX, ADOX or AVX-512 instructions.
+
+`--simd` accepts exactly `auto`, `portable`, `bmi2`, `bmi2-adx` and `ifma`. Automatic scalar priority is BMI2+ADX, BMI2-only, then generic Go; suitable workloads can instead select IFMA. BMI2 and ADX detection is independent of AVX OS-state requirements. AVX2 and AVX-512 automatic paths still require their CPU features and usable vector state and XGETBV itself remains guarded by XSAVE/OSXSAVE. Compiled availability, detected support, requested mode and resolved paths are separate facts. Purego/non-amd64 builds reject native selections as absent implementations.
+
+An explicit selection attempts the requested implementation even when detection disagrees. It neither changes feature flags nor enables processor/OS facilities and there is no signal handler, synthesized fault or retry fallback. Unsupported instructions may terminate through normal OS/runtime illegal-instruction handling. Explicit IFMA overrides the independent-walk performance preference; its scalar hybrid inversion/sign backend is resolved once, separately. `portable` forces onino's generic field arithmetic, not a purego process. Matching and checksum dispatch remain independent and consistent across scalar comparisons. IFMA's fused prefix filter is an unavoidable additional difference. Startup prints detected features, build availability and actual engine/matching/checksum choices from the same configuration used by workers, distinguishes `auto` from `forced` and warns before forced kernels if support is not reported.
+
+#### Baseline and complete-search evidence
+
+Baseline CLI and search-test executables were preserved from `56d8ff7eb8e147b605cc812afaa2e27c9d09311b` before editing. The local host was a Ryzen 9 9950X3D running Windows/amd64, exposing usable AVX2, BMI2, ADX and AVX-512 IFMA. All builds, tests, profiling and timing runs were sequential, with process affinity fixed to logical CPU 2 (mask 4), one search worker, `GOMAXPROCS=1`, PACE Go 1.27.1, `GOAMD64=v1`, `CGO_ENABLED=0` and `-pgo=off`, except the separate builder-managed CGO GPU compatibility suite. Stock Go 1.27.1 was checked for compatibility. No concurrent benchmark/build/profile processes were used.
+
+Three-second complete rare-prefix profiles were collected separately from throughput measurements. Baseline generic multiplication/reduction consumed about 87% inclusive sampled time. The new BMI2 profile attributed approximately 43% to fused preparation, 27% to reciprocal reconstruction and 16% to the remaining BMI2 multiplications; ADX field leaves did not appear in that profile. The final portable profile likewise showed generic multiplication dominating, without optimized onino field kernels. These are sampling observations backed by dispatch tests and instruction inspection, not hardware-counter measurements.
+
+The following medians are Mkeys/s from five alternating order-reversed rounds of one-second `BenchmarkFullSearch` samples. Initialization is excluded; deterministic SHAKE entropy and a no-op callback replace OS entropy and disk saving. Candidate generation, canonical encoding, exact matching, sign recovery, snapshots, reseeding and table transitions are included. The baseline's test-only arithmetic control disabled its old BMI2+ADX field switch for the generic comparison, while preserving matching/checksum settings; it did not modify the preserved CLI. Final runs use the final `--simd` mode resolver through `ONINO_BENCH_BACKEND`.
+
+| Complete search | Generic before → after | New BMI2 | BMI2+ADX before → after | IFMA before → after |
+| --- | ---: | ---: | ---: | ---: |
+| Rare `somethingrare.` | 8.642 → 8.655 | 21.243 | 25.489 → 25.507 | 70.505 → 69.758 |
+| Frequent `ab.` | 7.964 → 8.012 | 17.746 | 20.628 → 20.630 | 42.504 → 42.151 |
+| 512 anywhere patterns | 7.057 → 7.072 | 14.006 | 15.288 → 15.805 | 24.312 → 24.209 |
+| 512 shared-triplet patterns | 7.058 → 7.118 | 14.062 | 14.566 → 15.881 | 24.513 → 24.433 |
+| Mixed dictionary/anchors | 6.880 → 6.947 | 13.443 | 13.914 → 15.085 | 22.371 → 22.466 |
+
+Final rare-search ranges were generic 8.619-8.675, BMI2 21.239-21.255, ADX 25.386-25.524 and IFMA 69.334-69.777 Mkeys/s, with zero steady-state allocations. Baseline ADX dictionary samples were noticeably noisier; their apparent improvements should not be attributed solely to arithmetic. A separate five-pair automatic-policy control measured short-dictionary search at 2.079 → 2.067M and every-candidate-hit search at 0.1306 → 0.1297M, both using independent ADX walks. Explicit IFMA instead measured 1.908M and 0.105M in the initial screen because forcing intentionally chooses paired IFMA for those workloads. That difference is a selection tradeoff, not a like-for-like IFMA regression.
+
+Real CLI searches used `somethingrare.`, OS entropy, the normal saver/coordinator and graceful cancellation after approximately eleven seconds. Five alternating runs per configuration used exact final checked counts divided by the reported full-run wall time, including setup, initial reseeding and shutdown. Every run produced two five-second progress reports, one final summary, zero saves and exact batch-multiple candidate accounting. The old CLI's `avx2` ceiling selected ADX and its `auto` selected IFMA; the rare-prefix workload used no checksum acceleration, so that old ceiling did not change matching/checksum work relative to the new scalar modes.
+
+| Real CLI engine | Before median [range], Mkeys/s | After median [range], Mkeys/s |
+| --- | ---: | ---: |
+| Generic | Not selectable in old CLI | 8.370 [8.337, 8.486] |
+| BMI2-only | Not implemented | 21.037 [20.832, 21.055] |
+| BMI2+ADX | 25.105 [24.487, 25.194] | 25.244 [24.746, 25.254] |
+| IFMA | 69.312 [68.650, 69.454] | 70.064 [69.119, 70.150] |
+
+BMI2-only was approximately 2.51x generic and 83% of ADX throughput in the real CLI. Existing ADX and IFMA were broadly unchanged: the IFMA microbenchmark difference and CLI difference have opposite signs, around 1%, rather than establishing a consistent speedup. Forcing BMI2 on Zen 5 does not simulate Haswell latency, scheduling, cache or virtualization behavior. No VPS speedup is promised.
+
+#### Bounded follow-up experiments
+
+After establishing the arithmetic baseline, four interleaved prefix-product chains were tested separately. Four terminal products were batch-inverted with one divsteps inversion and each reverse chain used its corresponding reciprocal. Correctness checks passed, but five alternating one-second samples measured rare search at 21.251 → 21.042M and frequent search at 17.748 → 17.557M, approximately 1% slower. The extra chains were discarded.
+
+An independent batch-size screen changed scalar generation and fused-pass bounds together, keeping one prefix chain. Each variant passed complete-key, transition, reseeding and reciprocal-reference checks. Five alternating one-second samples produced:
+
+| Checked candidates per batch | Rare Mkeys/s | Frequent Mkeys/s | Approximate paired state |
+| --- | ---: | ---: | ---: |
+| 256 | 20.203 | 17.000 | 57 KiB |
+| 512 | 21.248 | 17.757 | 114 KiB |
+| 1024 | 21.845 | 18.177 | 228 KiB |
+| 2048 | 22.111 | 18.381 | 456 KiB |
+
+The larger batches really gained about 2.8% and 4.1% on this host; short-dictionary/all-hit follow-ups showed small gains too. The retained size remains 512 because those gains require twice/four times the per-worker state and more initialization/batch-boundary cancellation work and this screen did not validate a new size across the IFMA pipeline or multicore cache pressure. Backend-specific batch sizing remains a tuning opportunity. Since the initial four-limb implementation already delivered a substantial complete-search improvement and approached ADX locally, the conditional fallback comparison with a new radix-`2^51` scalar representation was not pursued; no claim is made that it cannot improve further.
+
+#### Verification and reproduction
+
+The new BMI2 multiply/square tests compare full-width boundary/noncanonical inputs and 50,000 random pairs with independent `math/big` references, including left, right, both-input and in-place-square aliases. Batched reciprocal references now run under each scalar backend. Complete generated keys are compared with independent scalar multiplication through table transitions and epoch reseeding. Forced-mode tests cover saved-key independence, immutable snapshots, exact candidate accounting, cancellation and actual worker/nested-helper selection. Mixed scalar-arithmetic/AVX-512-checksum tests compare the complete saved-key sequence across portable, BMI2 and ADX. Mocked missing-feature reports execute only kernels supported by the real test CPU, without changing global CPU flags. Separate tests cover automatic BMI2 without ADX, ADX, IFMA, missing OS vector state, absent compiled implementations, invalid/removed values and reporting detection separately from forcing, including visibility before GPU initialization. Native illegal-instruction delivery was not tested: the host supports all requested instructions and no fault was synthesized.
+
+PACE and stock-Go native/purego suites and the GPU-enabled host suite passed. GPU device tests remained opt-in and were not executed. Custom vet passed with tests for native/purego and for Linux amd64/arm64 and Darwin arm64 targets. PACE Linux amd64/arm64 cross-builds succeeded; those binaries were not run locally. Assembly listings confirmed the new backend's instruction/register constraints. All performance claims above are from PACE, not stock Go or a remote machine.
+
+The measured Windows CLI build used `builder build go --pace --compat --no-gen -pgo=off --output bin/bmi2-final.exe` with `CGO_ENABLED=0` and `GOAMD64=v1`. For a matching compatible Linux amd64 binary, use:
+
+```sh
+builder build go linux --arch amd64 --pace --compat --no-gen -pgo=off --output bin/onino-linux-amd64
+```
+
+On the VPS, choose a logical CPU allowed by its affinity mask and run the following sequentially, alternating their order over repeated equal-duration runs. `timeout` sends SIGINT so onino can print exact final accounting and drain accepted saves; the comparison is the final checked count divided by the full elapsed time. The explicit modes deliberately override detection; `auto` performs capability checks.
+
+```sh
+CPU=0
+GOMAXPROCS=1 taskset -c "$CPU" timeout -s INT 30s ./onino --cpu 1 --simd auto 'somethingrare.'
+GOMAXPROCS=1 taskset -c "$CPU" timeout -s INT 30s ./onino --cpu 1 --simd portable 'somethingrare.'
+GOMAXPROCS=1 taskset -c "$CPU" timeout -s INT 30s ./onino --cpu 1 --simd bmi2 'somethingrare.'
+```
+
+On the ADX-capable host, the corresponding deliberate override is `--simd bmi2-adx`. `--simd ifma` likewise overrides detection and should only be used for a throughput comparison on an IFMA-capable host; either command can fault on the described VPS. These commands are instructions for subsequent user validation, not remote measurements performed for this study.
+
 ### Same-source compiler comparison
 
 Stock Go and PACE Go 1.27.1 were built from the same source on Windows 11/amd64, Ryzen 9 9950X3D, with `GOAMD64=v1`, `GOMAXPROCS=1`, no PGO and logical CPU 2 affinity. Five one-second samples per compiler were run serially, alternating compiler order. Both builds use the same production engine selection and native arithmetic/matching backends. These historical timings precede the fingerprint-and-divsteps study and use padded-key suffix semantics. The exact source commit was not recorded; the "same-source" comparison must not be treated as a comparison of different optimization stages. Stock Go remains a compatibility target.
@@ -523,7 +605,7 @@ Full-search benchmarks replace OS entropy with deterministic SHAKE and saving wi
 
 The AVX-512 study amortized paired arithmetic across independent centers without changing the search's scalar sequence or its immediate hit handling. It evaluated eight-lane IFMA (integer fused multiply-add), inversion/fusion, canonical prefix filtering, four-lane IFMA, dictionary/anywhere filtering and single-message SHA3 in that order. PACE Go 1.27.1 is the performance target; stock Go 1.27.1 is a compatibility target. The baseline was preserved from `7bca9a8` before implementation, including separate CLI and search-test executables; the retained extension is recorded in `35b17e5`.
 
-One `GOAMD64=v1` binary contains the existing CPU engines and the optional implementations. `--simd=auto` selects at initialization; `--simd=avx2` bypasses the new feature query entirely, including IFMA with 256-bit operands. There is no AVX-512 package-initialization probe. Detection first checks CPUID availability and XSAVE, OSXSAVE and AVX, then reads XCR0; bits 1, 2, 5, 6 and 7 must all be enabled (`XCR0 & 0xe6 == 0xe6`). Individual kernels additionally require these subsets:
+In this historical study, one `GOAMD64=v1` binary contained the existing CPU engines and the optional implementations. `--simd=auto` selected at initialization; the now-removed `--simd=avx2` bypassed the new feature query entirely, including IFMA with 256-bit operands. There was no AVX-512 package-initialization probe. Detection first checked CPUID availability and XSAVE, OSXSAVE and AVX, then read XCR0; bits 1, 2, 5, 6 and 7 had to be enabled (`XCR0 & 0xe6 == 0xe6`). The current automatic path retains these vector-state requirements; current explicit forcing is described above. Individual kernels additionally require these subsets:
 
 | Implementation | Instruction subsets after the common OS-state check | Status |
 | --- | --- | --- |

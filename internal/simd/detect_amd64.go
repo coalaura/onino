@@ -13,14 +13,15 @@ func query() registers {
 	}
 
 	_, _, leaf1, _ := cpuid(1, 0)
-	required := uint32(1<<26 | 1<<27 | 1<<28)
-
-	if leaf1&required != required {
-		return registers{maximum: maximum, leaf1: leaf1}
-	}
-
-	state := xgetbv()
 	_, leaf7b, leaf7c, _ := cpuid(7, 0)
+
+	required := uint32(1<<26 | 1<<27)
+
+	var state uint64
+
+	if leaf1&required == required {
+		state = xgetbv()
+	}
 
 	return registers{maximum: maximum, leaf1: leaf1, leaf7b: leaf7b, leaf7c: leaf7c, xcr0: state}
 }

@@ -2,11 +2,18 @@
 
 package search
 
+import "github.com/coalaura/onino/internal/simd"
+
+const scalarAssemblyAvailable = true
+
 var fastFieldAvailable = supportsBMI2ADX()
 
 //go:noescape
 func supportsBMI2ADX() bool
 
+// The historical *BMI2 entry points require both BMI2 and ADX. The separate
+// *BMI2Only leaves use ordinary carries and are selected by --simd=bmi2.
+//
 //go:noescape
 //go:abiinternal result=AX left=BX right=CX ->
 func multiplyBMI2(result, left, right *fieldElement)
@@ -32,13 +39,30 @@ func pairedPrepareBMI2(center *pairedAffine, scratch *pairedScratch, offset *pai
 func pairedInverseBMI2(scratch *pairedScratch, inverse *fieldElement)
 
 func advanceBatch(points []extendedPoint, products []fieldElement) {
-	if !fastFieldAvailable {
-		advanceBatchGeneric(points, products)
+	advanceBatchWith(points, products, defaultFieldMode)
+}
+
+func advanceBatchWith(points []extendedPoint, products []fieldElement, mode simd.Mode) {
+	if mode == simd.Portable {
+		advanceBatchGenericWith(points, products, mode)
 
 		return
 	}
 
 	var scratch [8]fieldElement
+
+	if mode == simd.BMI2 {
+		advanceBMI2Only(&points[0], &scratch, &searchStep)
+
+		products[0] = points[0].zCoordinate
+
+		for index := 1; index < len(points); index++ {
+			advanceBMI2Only(&points[index], &scratch, &searchStep)
+			multiplyBMI2Only(&products[index], &products[index-1], &points[index].zCoordinate)
+		}
+
+		return
+	}
 
 	advanceBMI2(&points[0], &scratch, &searchStep)
 

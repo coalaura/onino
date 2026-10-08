@@ -11,6 +11,7 @@ import (
 
 	"github.com/coalaura/onino/internal/onion"
 	"github.com/coalaura/onino/internal/pattern"
+	"github.com/coalaura/onino/internal/simd"
 )
 
 const (
@@ -31,6 +32,7 @@ type generator struct {
 	round      uint64
 	random     io.Reader
 	sink       matchSink
+	fieldMode  simd.Mode
 }
 
 func (generator *generator) reseed(index int) error {
@@ -71,6 +73,10 @@ func (generator *generator) reseed(index int) error {
 }
 
 func (generator *generator) reset() error {
+	if generator.fieldMode == simd.Auto {
+		generator.fieldMode = defaultFieldMode
+	}
+
 	generator.round = 0
 
 	for index := range generator.points {
@@ -90,7 +96,7 @@ func (generator *generator) next() {
 func (generator *generator) nextBatch(deferSign bool) {
 	generator.round++
 
-	generateBatch(generator.points[:], generator.products[:], generator.publicKeys[:], deferSign)
+	generateBatchWith(generator.points[:], generator.products[:], generator.publicKeys[:], deferSign, generator.fieldMode)
 }
 
 //go:inline
@@ -100,7 +106,7 @@ func (generator *generator) matches(index int, matcher, filter *pattern.Matcher)
 			return false
 		}
 
-		completeSign(&generator.points[index], &generator.products[index], &generator.publicKeys[index])
+		completeSignWith(&generator.points[index], &generator.products[index], &generator.publicKeys[index], generator.fieldMode)
 	}
 
 	return matcher.Match(generator.publicKeys[index])

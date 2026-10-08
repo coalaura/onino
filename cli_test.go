@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/coalaura/onino/internal/search"
 )
 
 func TestCPUFlag(t *testing.T) {
@@ -58,7 +60,7 @@ func TestSIMDFlag(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	values := []string{"auto", "avx2", "", "avx512", "AUTO"}
+	values := []string{"auto", "portable", "bmi2", "bmi2-adx", "ifma", "avx2", "", "avx512", "AUTO"}
 
 	for _, value := range values {
 		command := newCommand()
@@ -71,7 +73,11 @@ func TestSIMDFlag(t *testing.T) {
 		arguments := []string{"onino", "--simd", value, "--output", t.TempDir(), "rare."}
 
 		err := command.Run(ctx, arguments)
-		valid := value == "auto" || value == "avx2"
+		valid := value == "auto" || value == "portable"
+
+		if value == "bmi2" || value == "bmi2-adx" || value == "ifma" {
+			valid = strings.Contains(search.BuildDescription(), "amd64")
+		}
 
 		if (err == nil) != valid {
 			t.Fatalf("--simd %q: %v", value, err)

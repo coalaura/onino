@@ -74,9 +74,12 @@ func runWithSIMD(ctx context.Context, matcher *pattern.Matcher, save SaveFunc, r
 		return stats, err
 	}
 
-	features := simd.Detect(mode)
+	config, err := Resolve(mode, matcher)
+	if err != nil {
+		return stats, err
+	}
 
-	state, err := newWorkerWithSIMD(rand.Reader, matcher, features)
+	state, err := newWorkerWithConfig(rand.Reader, matcher, config)
 	if err != nil {
 		return stats, err
 	}
