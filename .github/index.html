@@ -1,0 +1,2246 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+		<meta name="color-scheme" content="dark" />
+		<meta name="theme-color" content="#111113" />
+		<meta name="description" content="onino searches for vanity Tor v3 .onion addresses on CPU, with optional Vulkan GPU acceleration. Download, choose a pattern and save Tor-compatible service keys." />
+
+		<meta property="og:title" content="onino - vanity .onion search" />
+		<meta property="og:description" content="CPU search. Optional Vulkan GPU acceleration. Tor-compatible service keys." />
+		<meta property="og:type" content="website" />
+
+		<title>onino - vanity .onion search</title>
+
+		<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%2398bf60' d='M15 9 11 1l7 4 5-3-4 9z'/%3E%3Cpath fill='%23b178d3' d='M16 7C13 14 4 12 4 21a12 10 0 0 0 24 0c0-9-9-7-12-14'/%3E%3Cpath fill='%23f3eedf' d='M16 13c-2 5-7 5-7 9a7 5 0 0 0 14 0c0-4-5-4-7-9'/%3E%3C/svg%3E">
+
+		<style>
+			:root {
+				color-scheme: dark;
+				--background: #111113;
+				--surface: #171619;
+				--text: #f3eedf;
+				--muted: #aaa7af;
+				--purple: #b178d3;
+				--green: #a4c978;
+				--border: #333036;
+				--mono: "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+				font-family: Inter, "Segoe UI", Arial, sans-serif;
+				font-synthesis: none;
+				background: var(--background);
+				color: var(--text);
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			html {
+				scroll-behavior: smooth;
+				scroll-padding-top: 2rem;
+			}
+
+			body {
+				margin: 0;
+			}
+
+			::selection {
+				color: var(--background);
+				background: var(--purple);
+			}
+
+			a {
+				color: inherit;
+				text-decoration: none;
+			}
+
+			button {
+				font: inherit;
+			}
+
+			a,
+			button {
+				-webkit-tap-highlight-color: transparent;
+			}
+
+			button,
+			.button {
+				border-radius: 2px;
+			}
+
+			button {
+				cursor: pointer;
+			}
+
+			[hidden] {
+				display: none !important;
+			}
+
+			a:focus-visible,
+			button:focus-visible {
+				outline: 2px solid var(--green);
+				outline-offset: 5px;
+			}
+
+			p,
+			h1,
+			h2,
+			h3 {
+				margin: 0;
+			}
+
+			.page-shell {
+				max-width: 1256px;
+				margin: 0 auto;
+				padding: 0 48px;
+			}
+
+			.site-header {
+				height: 105px;
+				border-bottom: 1px solid var(--border);
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 2rem;
+			}
+
+			.brand {
+				display: inline-flex;
+				align-items: center;
+			}
+
+			.brand img {
+				display: block;
+				width: 142px;
+				height: auto;
+			}
+
+			nav {
+				display: flex;
+				align-items: center;
+				gap: 2.1rem;
+				font-size: .875rem;
+			}
+
+			nav a {
+				color: #c5c1cb;
+				padding: .6rem 0;
+				transition: color .15s;
+			}
+
+			nav a:hover,
+			.text-link:hover,
+			.site-footer a:hover {
+				color: var(--green);
+			}
+
+			.nav-github {
+				display: flex;
+				gap: .65rem;
+				align-items: center;
+				color: var(--text);
+			}
+
+			.hero {
+				display: grid;
+				grid-template-columns: 1.23fr 1fr;
+				gap: 5rem;
+				padding: 90px 0 76px;
+				align-items: center;
+			}
+
+			.eyebrow {
+				font: .75rem/1.5 var(--mono);
+				letter-spacing: .12em;
+				color: var(--purple);
+				margin-bottom: 1.5rem;
+			}
+
+			h1 {
+				font-size: clamp(3.25rem, 5.2vw, 4.6rem);
+				font-weight: 540;
+				line-height: 1.065;
+				letter-spacing: -.055em;
+			}
+
+			h1 span {
+				color: var(--purple);
+			}
+
+			.hero-description {
+				max-width: 455px;
+				color: var(--muted);
+				font-size: 1.0625rem;
+				line-height: 1.75;
+				margin-top: 1.75rem;
+			}
+
+			.hero-actions {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 12px;
+				margin-top: 2rem;
+			}
+
+			.button {
+				display: inline-flex;
+				justify-content: center;
+				align-items: center;
+				min-height: 46px;
+				padding: 0 24px;
+				font-size: .875rem;
+				font-weight: 600;
+				border: 1px solid transparent;
+				transition: background .15s, border-color .15s;
+			}
+
+			.button-primary {
+				background: var(--purple);
+				color: #17111c;
+			}
+
+			.button-primary:hover {
+				background: #c890e6;
+			}
+
+			.button-secondary {
+				border-color: #48424b;
+			}
+
+			.button-secondary:hover {
+				border-color: var(--purple);
+				background: #201a25;
+			}
+
+			.hero-meta {
+				font: .75rem/1.7 var(--mono);
+				color: #96919b;
+				margin-top: 22px;
+			}
+
+			.hero-meta span {
+				color: #605866;
+				padding: 0 7px;
+			}
+
+			.hero-performance {
+				display: block;
+				margin-top: 24px;
+				font-size: .875rem;
+				color: #c1b8c9;
+				line-height: 1.7;
+			}
+
+			.hero-performance strong {
+				color: var(--green);
+				font-weight: 600;
+			}
+
+			.hero-performance:hover {
+				text-decoration: underline;
+				text-underline-offset: 4px;
+			}
+
+			.onion-result {
+				align-self: center;
+				background: var(--surface);
+				border: 1px solid #43334c;
+				border-top: 2px solid var(--purple);
+				padding: 25px 28px 18px;
+				position: relative;
+				min-width: 0;
+			}
+
+			.result-heading {
+				display: flex;
+				justify-content: space-between;
+				gap: 1rem;
+				align-items: center;
+				margin-bottom: 29px;
+			}
+
+			.result-heading h2 {
+				font: .75rem/1.6 var(--mono);
+				color: #b1a7bb;
+				letter-spacing: .065em;
+			}
+
+			.result-index {
+				font: .75rem var(--mono);
+				color: #7d6989;
+			}
+
+			.onion-host {
+				display: block;
+				font: clamp(1.25rem, 2.3vw, 1.8rem)/1.42 var(--mono);
+				letter-spacing: -.025em;
+				color: #8f8696;
+				width: fit-content;
+			}
+
+			.host-line {
+				display: block;
+			}
+
+			.onion-host strong {
+				color: var(--green);
+				font-weight: 500;
+			}
+
+			.onion-host:hover {
+				color: #beb3c6;
+			}
+
+			.onion-suffix {
+				display: block;
+				color: var(--purple);
+			}
+
+			.result-bottom {
+				border-top: 1px solid var(--border);
+				margin-top: 26px;
+				padding-top: 21px;
+				display: flex;
+				align-items: flex-end;
+				justify-content: space-between;
+				gap: 8px;
+			}
+
+			.result-label {
+				font-size: .8125rem;
+				color: var(--muted);
+			}
+
+			.result-time {
+				font: 2.75rem/1.25 var(--mono);
+				letter-spacing: -.06em;
+				color: var(--text);
+				margin-top: 5px;
+			}
+
+			.result-time span {
+				color: var(--purple);
+				font-size: 1.5rem;
+				margin-left: 4px;
+			}
+
+			.copy-button {
+				border: 0;
+				background: transparent;
+				color: #b9b0c1;
+				font: .75rem/1.5 var(--mono);
+				padding: 7px 10px;
+				min-height: 32px;
+				transition: color .15s, background .15s;
+			}
+
+			.copy-button:hover {
+				color: var(--text);
+				background: #2c2532;
+			}
+
+			.address-copy {
+				border: 1px solid #49404f;
+				white-space: nowrap;
+				margin-bottom: 8px;
+			}
+
+			.tor-note {
+				font: .75rem/1.7 var(--mono);
+				color: #96909e;
+				margin-top: 16px;
+			}
+
+			.capabilities {
+				border-top: 1px solid var(--border);
+				border-bottom: 1px solid var(--border);
+				display: grid;
+				grid-template-columns: repeat(3, 1fr);
+				padding: 25px 0;
+			}
+
+			.capabilities>div {
+				display: flex;
+				gap: 16px;
+				align-items: flex-start;
+				padding: 0 25px;
+				border-left: 1px solid var(--border);
+			}
+
+			.capabilities>div:first-child {
+				padding-left: 0;
+				border-left: 0;
+			}
+
+			.capabilities>div:last-child {
+				padding-right: 0;
+			}
+
+			.capability-number {
+				color: var(--purple);
+				font: .75rem/1.7 var(--mono);
+				padding-top: 2px;
+			}
+
+			.capabilities h2 {
+				font-size: .9375rem;
+				line-height: 1.5;
+				font-weight: 550;
+			}
+
+			.capabilities p {
+				color: var(--muted);
+				font-size: .875rem;
+				line-height: 1.7;
+				margin-top: 5px;
+			}
+
+			.content-section {
+				padding: 79px 0;
+				border-bottom: 1px solid var(--border);
+			}
+
+			.section-heading {
+				display: flex;
+				justify-content: space-between;
+				align-items: flex-end;
+				gap: 24px;
+				margin-bottom: 36px;
+			}
+
+			.content-section .eyebrow,
+			.source-section .eyebrow {
+				margin-bottom: 12px;
+			}
+
+			.content-section h2,
+			.source-section h2 {
+				font-size: 2rem;
+				line-height: 1.2;
+				font-weight: 500;
+				letter-spacing: -.035em;
+			}
+
+			.text-link {
+				font-size: .875rem;
+				text-decoration: underline;
+				text-underline-offset: 5px;
+				text-decoration-color: #5b4c64;
+				line-height: 1.7;
+			}
+
+			.section-heading>.text-link {
+				margin-bottom: 4px;
+			}
+
+			.quickstart-grid {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 32px;
+			}
+
+			.quickstart-step {
+				min-width: 0;
+			}
+
+			.step-title {
+				display: flex;
+				gap: 10px;
+				align-items: baseline;
+				margin-bottom: 14px;
+			}
+
+			.step-number {
+				color: #8f7c9b;
+				font: .75rem var(--mono);
+			}
+
+			.step-title h3 {
+				font-size: 1rem;
+				font-weight: 500;
+			}
+
+			.step-platform {
+				margin-left: auto;
+				color: var(--muted);
+				font: .75rem var(--mono);
+			}
+
+			.code-block {
+				border: 1px solid var(--border);
+				background: #151417;
+			}
+
+			.code-toolbar {
+				display: flex;
+				justify-content: space-between;
+				align-items: center;
+				min-height: 44px;
+				border-bottom: 1px solid #29262e;
+				padding: 0 8px 0 16px;
+				color: #9b939f;
+				font: .75rem var(--mono);
+			}
+
+			pre {
+				margin: 0;
+				padding: 24px 18px;
+				overflow-x: auto;
+				scrollbar-width: thin;
+				scrollbar-color: #64516e transparent;
+			}
+
+			pre code {
+				font: .8125rem/1.8 var(--mono);
+				color: var(--green);
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+			}
+
+			.step-description {
+				font-size: .9375rem;
+				line-height: 1.7;
+				color: var(--muted);
+				margin-top: 17px;
+			}
+
+			.subtle-link {
+				display: inline-block;
+				font-size: .8125rem;
+				margin-top: 10px;
+				color: #c7c0ce;
+			}
+
+			.step-footnote {
+				color: #aaa2b2;
+				font-size: .8125rem;
+				line-height: 1.7;
+				margin-top: 10px;
+			}
+
+			.mode-selector {
+				display: flex;
+				gap: 18px;
+				align-self: stretch;
+			}
+
+			.mode-button {
+				border: 0;
+				border-bottom: 1px solid transparent;
+				border-radius: 0;
+				padding: 0;
+				background: transparent;
+				color: #aaa0b2;
+				font: .75rem var(--mono);
+			}
+
+			.mode-button.active {
+				border-bottom-color: var(--purple);
+				color: var(--text);
+			}
+
+			.mode-button:hover {
+				color: var(--text);
+			}
+
+			.output-note {
+				margin-top: 29px;
+				border-left: 2px solid #5e7549;
+				padding-left: 16px;
+				display: flex;
+				flex-wrap: wrap;
+				gap: 12px 25px;
+				align-items: center;
+			}
+
+			.output-label {
+				color: #a3aa9a;
+				font: .75rem/1.7 var(--mono);
+				letter-spacing: .06em;
+			}
+
+			.output-note>div {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 7px 24px;
+			}
+
+			.output-note code {
+				font: .75rem/1.7 var(--mono);
+				color: #b2abae;
+				overflow-wrap: anywhere;
+			}
+
+			.patterns-section {
+				display: grid;
+				grid-template-columns: .8fr 1.2fr;
+				gap: 80px;
+			}
+
+			.pattern-intro p:not(.eyebrow) {
+				color: var(--muted);
+				font-size: 1rem;
+				line-height: 1.75;
+				max-width: 290px;
+				margin: 21px 0;
+			}
+
+			.pattern-reference {
+				min-width: 0;
+			}
+
+			table {
+				width: 100%;
+				border-collapse: collapse;
+				text-align: left;
+			}
+
+			th {
+				color: #a59bab;
+				font: .75rem var(--mono);
+				letter-spacing: .09em;
+				text-transform: uppercase;
+				padding: 0 0 14px;
+				border-bottom: 1px solid #48404e;
+			}
+
+			td {
+				border-bottom: 1px solid #2a272e;
+				padding: 13px 0;
+				font-size: .875rem;
+				line-height: 1.6;
+				color: #bdb6c5;
+			}
+
+			td:first-child {
+				width: 40%;
+				padding-right: 20px;
+			}
+
+			td code {
+				color: var(--text);
+				font: .875rem var(--mono);
+			}
+
+			td code span {
+				color: var(--green);
+				font-weight: 600;
+			}
+
+			.pattern-note {
+				color: #a39ba8;
+				font-size: .8125rem;
+				line-height: 1.8;
+				margin-top: 16px;
+			}
+
+			.pattern-note code {
+				color: #c0b3c9;
+				font-size: .8125rem;
+			}
+
+			.benchmark-section .section-heading {
+				margin-bottom: 20px;
+			}
+
+			.benchmark-intro {
+				max-width: 730px;
+				color: var(--muted);
+				font-size: 1rem;
+				line-height: 1.75;
+			}
+
+			.benchmark-hardware {
+				margin-top: 16px;
+				font: .75rem/1.9 var(--mono);
+				color: #b8aebf;
+			}
+
+			.benchmark-hardware span {
+				color: #756480;
+				margin: 0 8px;
+			}
+
+			.benchmark-controls {
+				margin-top: 30px;
+				display: flex;
+				align-items: center;
+				gap: 20px;
+				flex-wrap: wrap;
+			}
+
+			.benchmark-control-label {
+				color: #a99cb4;
+				font: .75rem var(--mono);
+			}
+
+			.workload-selector {
+				display: flex;
+				gap: 6px;
+				flex-wrap: wrap;
+			}
+
+			.workload-selector button {
+				padding: 9px 12px;
+				border: 1px solid #3c3344;
+				background: transparent;
+				color: #b7acbf;
+				font: .8125rem/1.5 var(--mono);
+			}
+
+			.workload-selector button:hover {
+				border-color: var(--purple);
+				color: var(--text);
+			}
+
+			.workload-selector .selected {
+				background: #302239;
+				border-color: #856097;
+				color: var(--text);
+			}
+
+			.benchmark-figure {
+				margin: 27px 0 0;
+				padding: 25px 0 0;
+				border-top: 1px solid var(--border);
+				--chart-label: 225px;
+				--chart-value: 85px;
+			}
+
+			.benchmark-figure figcaption {
+				display: flex;
+				justify-content: space-between;
+				gap: 15px;
+				font: .75rem/1.7 var(--mono);
+				color: #aea2b7;
+			}
+
+			.benchmark-axis {
+				margin: 24px calc(var(--chart-value) + 18px) 0 calc(var(--chart-label) + 18px);
+				display: flex;
+				justify-content: space-between;
+				font: .75rem/1.5 var(--mono);
+				color: #a697b0;
+			}
+
+			.benchmark-group {
+				padding-top: 17px;
+			}
+
+			.benchmark-group+.benchmark-group {
+				margin-top: 14px;
+				border-top: 1px solid #2c2632;
+			}
+
+			.benchmark-group h3 {
+				font: .75rem/1.6 var(--mono);
+				color: #aaa0b3;
+				margin-bottom: 9px;
+			}
+
+			.benchmark-row {
+				display: grid;
+				grid-template-columns: var(--chart-label) minmax(0, 1fr) var(--chart-value);
+				gap: 18px;
+				align-items: center;
+				min-height: 44px;
+			}
+
+			.benchmark-miner {
+				color: #cbc4d0;
+				font-size: .9375rem;
+				line-height: 1.5;
+			}
+
+			.benchmark-miner span {
+				font: .75rem/1.6 var(--mono);
+				margin-left: 8px;
+				color: #a99db3;
+			}
+
+			.benchmark-track {
+				height: 20px;
+				border-left: 1px solid #504456;
+				background: repeating-linear-gradient(to right, transparent 0, transparent calc(33.3333% - 1px), #29242f calc(33.3333% - 1px), #29242f 33.3333%);
+			}
+
+			.benchmark-bar {
+				height: 100%;
+				background: #777080;
+			}
+
+			.benchmark-row-onino .benchmark-bar {
+				background: var(--purple);
+			}
+
+			.benchmark-row-best .benchmark-bar {
+				background: var(--green);
+			}
+
+			.benchmark-row-best .benchmark-miner,
+			.benchmark-row-best .benchmark-value {
+				color: var(--green);
+			}
+
+			.benchmark-value {
+				font: .9375rem/1.5 var(--mono);
+				color: #d2cbd9;
+				text-align: right;
+				font-variant-numeric: tabular-nums;
+			}
+
+			.benchmark-workload-note {
+				margin-top: 20px;
+				font-size: .8125rem;
+				line-height: 1.8;
+				color: #a99db3;
+			}
+
+			.benchmark-ratios {
+				display: grid;
+				grid-template-columns: 1fr 1fr;
+				gap: 30px;
+				margin-top: 28px;
+				padding: 23px 0;
+				border-top: 1px solid var(--border);
+				border-bottom: 1px solid var(--border);
+			}
+
+			.benchmark-ratios>div {
+				display: flex;
+				align-items: center;
+				gap: 20px;
+			}
+
+			.benchmark-ratios strong {
+				font: 2.4rem/1.2 var(--mono);
+				letter-spacing: -.06em;
+				color: var(--green);
+			}
+
+			.benchmark-ratios>div+div strong {
+				color: var(--purple);
+			}
+
+			.benchmark-ratios p {
+				color: #c9c0d1;
+				font-size: .875rem;
+				line-height: 1.6;
+			}
+
+			.benchmark-ratios p span {
+				display: block;
+				color: #a99db3;
+				font: .75rem/1.8 var(--mono);
+			}
+
+			.benchmark-details {
+				margin-top: 21px;
+			}
+
+			.benchmark-details summary {
+				width: fit-content;
+				cursor: pointer;
+				color: #c9bed2;
+				font-size: .875rem;
+				line-height: 1.8;
+			}
+
+			.benchmark-details summary:hover {
+				color: var(--green);
+			}
+
+			.benchmark-details summary:focus-visible,
+			.benchmark-table-scroll:focus-visible {
+				outline: 2px solid var(--green);
+				outline-offset: 4px;
+			}
+
+			.benchmark-details>p {
+				font-size: .8125rem;
+				line-height: 1.8;
+				color: #aaa0b3;
+				margin-top: 15px;
+				max-width: 960px;
+			}
+
+			.benchmark-table-scroll {
+				overflow-x: auto;
+				margin: 22px 0;
+				scrollbar-width: thin;
+			}
+
+			.benchmark-table {
+				min-width: 830px;
+			}
+
+			.benchmark-table caption {
+				text-align: left;
+				padding-bottom: 16px;
+				font: .75rem var(--mono);
+				color: #b8aebf;
+			}
+
+			.benchmark-table th,
+			.benchmark-table td {
+				font-size: .75rem;
+				line-height: 1.7;
+				padding: 11px 9px;
+				text-align: right;
+			}
+
+			.benchmark-table th {
+				text-transform: none;
+				letter-spacing: 0;
+			}
+
+			.benchmark-table th:first-child {
+				text-align: left;
+				padding-left: 0;
+			}
+
+			.benchmark-table tbody th {
+				border-bottom: 1px solid #2a272e;
+			}
+
+			.benchmark-table td:last-child {
+				color: var(--green);
+			}
+
+			.benchmark-source-links {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 12px 25px;
+				margin-top: 20px;
+			}
+
+			.machine-benchmarks {
+				margin-top: 56px;
+				padding-top: 43px;
+				border-top: 1px solid var(--border);
+			}
+
+			.machine-benchmarks>h3 {
+				font-size: 1.75rem;
+				font-weight: 500;
+				line-height: 1.25;
+				letter-spacing: -.025em;
+				margin-bottom: 16px;
+			}
+
+			.machine-grid {
+				display: grid;
+				grid-template-columns: repeat(3, minmax(0, 1fr));
+				gap: 30px;
+				margin-top: 30px;
+			}
+
+			.machine-result {
+				min-width: 0;
+				border-top: 2px solid #705080;
+				padding-top: 20px;
+			}
+
+			.machine-category {
+				color: #aaa0b3;
+				font: .75rem/1.6 var(--mono);
+				letter-spacing: .06em;
+			}
+
+			.machine-result h4 {
+				margin: 11px 0 6px;
+				font-size: 1rem;
+				line-height: 1.5;
+				font-weight: 550;
+			}
+
+			.machine-system {
+				color: #ada3b6;
+				font-size: .8125rem;
+				line-height: 1.7;
+			}
+
+			.machine-backend {
+				margin-top: 13px;
+				font: .75rem/1.8 var(--mono);
+				color: var(--purple);
+			}
+
+			.machine-ratio {
+				display: flex;
+				align-items: baseline;
+				flex-wrap: wrap;
+				gap: 7px 12px;
+				margin-top: 20px;
+			}
+
+			.machine-ratio strong {
+				font: 2.25rem/1.2 var(--mono);
+				letter-spacing: -.06em;
+				color: var(--green);
+			}
+
+			.machine-ratio span {
+				color: #ada3b6;
+				font-size: .75rem;
+				line-height: 1.7;
+			}
+
+			.machine-rates {
+				margin: 19px 0 0;
+			}
+
+			.machine-rates>div {
+				display: flex;
+				justify-content: space-between;
+				align-items: baseline;
+				gap: 12px;
+				padding: 10px 0;
+				border-top: 1px solid #302936;
+			}
+
+			.machine-rates dt {
+				color: #beb3c8;
+				font-size: .875rem;
+			}
+
+			.machine-rates dd {
+				margin: 0;
+				color: #c9bed2;
+				font: 1rem/1.5 var(--mono);
+			}
+
+			.machine-rates>div:first-child dt,
+			.machine-rates>div:first-child dd {
+				color: var(--green);
+			}
+
+			.machine-unit {
+				margin-top: 10px;
+				color: #a99db3;
+				font-size: .75rem;
+				line-height: 1.7;
+			}
+
+			.machine-method-note {
+				margin-top: 23px;
+				color: #aaa0b3;
+				font-size: .8125rem;
+				line-height: 1.8;
+			}
+
+			.machine-table {
+				min-width: 800px;
+			}
+
+			.machine-table td:nth-child(2),
+			.machine-table th:nth-child(2) {
+				text-align: left;
+			}
+
+			.source-section {
+				padding: 57px 0;
+				display: grid;
+				grid-template-columns: 1.1fr 1fr;
+				gap: 80px;
+			}
+
+			.source-section h2 {
+				font-size: 1.75rem;
+			}
+
+			.source-section p:not(.eyebrow) {
+				color: var(--muted);
+				font-size: .9375rem;
+				line-height: 1.7;
+				max-width: 380px;
+				margin-top: 15px;
+			}
+
+			.source-links a {
+				display: flex;
+				justify-content: space-between;
+				flex-wrap: wrap;
+				gap: 8px 15px;
+				padding: 13px 0;
+				border-bottom: 1px solid var(--border);
+				font-size: .875rem;
+			}
+
+			.source-links a:first-child {
+				padding-top: 0;
+			}
+
+			.source-links a span {
+				color: #9990a0;
+				font: .75rem/1.7 var(--mono);
+			}
+
+			.source-links a:hover {
+				color: var(--green);
+			}
+
+			.site-footer {
+				border-top: 1px solid var(--border);
+				display: flex;
+				justify-content: space-between;
+				gap: 20px;
+				padding: 28px 0 35px;
+				font-size: .8125rem;
+				color: #a59cae;
+				line-height: 1.7;
+			}
+
+			.site-footer p>a:first-child {
+				font-weight: 600;
+				color: var(--text);
+			}
+
+			.footer-divider {
+				margin: 0 11px;
+				color: #615768;
+			}
+
+			.site-footer>div {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 25px;
+			}
+
+			.footer-note {
+				color: #89818e;
+			}
+
+			.copy-status {
+				position: fixed;
+				bottom: 22px;
+				left: 50%;
+				transform: translateX(-50%);
+				max-width: calc(100vw - 32px);
+				padding: 11px 18px;
+				border: 1px solid #62506e;
+				background: #251c2c;
+				color: var(--text);
+				font-size: .875rem;
+				opacity: 0;
+				pointer-events: none;
+				transition: opacity .15s;
+				z-index: 10;
+				text-align: center;
+			}
+
+			.copy-status.visible {
+				opacity: 1;
+			}
+
+			.sr-only,
+			.skip-link:not(:focus) {
+				position: absolute;
+				width: 1px;
+				height: 1px;
+				padding: 0;
+				margin: -1px;
+				overflow: hidden;
+				clip: rect(0, 0, 0, 0);
+				white-space: nowrap;
+				border: 0;
+			}
+
+			.skip-link:focus {
+				position: absolute;
+				z-index: 20;
+				top: 12px;
+				left: 12px;
+				padding: 15px;
+				background: var(--text);
+				color: var(--background);
+			}
+
+			@media (min-width: 1000px) {
+				.search-block pre {
+					min-height: 95px;
+				}
+			}
+
+			@media (max-width: 1050px) {
+				.page-shell {
+					padding: 0 32px;
+				}
+
+				.hero {
+					gap: 35px;
+					padding: 66px 0;
+				}
+
+				.onion-result {
+					padding: 23px;
+				}
+
+				.onion-host {
+					font-size: 1.55rem;
+				}
+
+				.patterns-section,
+				.source-section {
+					gap: 45px;
+				}
+
+				.result-time {
+					font-size: 2.4rem;
+				}
+
+				.address-copy {
+					font-size: .75rem;
+					padding: 7px;
+				}
+			}
+
+			@media (max-width: 760px) {
+				.machine-grid {
+					grid-template-columns: 1fr;
+					gap: 30px;
+				}
+
+				.machine-benchmarks {
+					margin-top: 40px;
+					padding-top: 35px;
+				}
+
+				.benchmark-figure {
+					--chart-label: 165px;
+					--chart-value: 75px;
+				}
+
+				.benchmark-miner span {
+					display: block;
+					margin-left: 0;
+				}
+
+				.benchmark-row {
+					padding: 8px 0;
+				}
+
+				.benchmark-ratios {
+					gap: 18px;
+				}
+
+				.benchmark-ratios>div {
+					flex-direction: column;
+					align-items: flex-start;
+					gap: 10px;
+				}
+
+				.page-shell {
+					padding: 0 24px;
+				}
+
+				.site-header {
+					height: 85px;
+					gap: 18px;
+				}
+
+				.brand img {
+					width: 116px;
+				}
+
+				nav {
+					gap: 18px;
+					font-size: .8125rem;
+				}
+
+				nav .nav-github svg {
+					display: none;
+				}
+
+				.hero {
+					grid-template-columns: 1fr;
+					padding: 55px 0 40px;
+					gap: 40px;
+				}
+
+				h1 {
+					font-size: clamp(3rem, 9vw, 4rem);
+				}
+
+				.hero-description {
+					max-width: 520px;
+				}
+
+				.onion-result {
+					padding: 25px;
+				}
+
+				.onion-host {
+					font-size: 1.75rem;
+				}
+
+				.onion-host .host-line {
+					display: inline;
+				}
+
+				.onion-host {
+					overflow-wrap: anywhere;
+				}
+
+				.onion-suffix {
+					display: inline;
+				}
+
+				.result-heading {
+					margin-bottom: 23px;
+				}
+
+				.result-time {
+					font-size: 2.75rem;
+				}
+
+				.address-copy {
+					font-size: .75rem;
+					padding: 7px 10px;
+				}
+
+				.capabilities {
+					grid-template-columns: 1fr;
+					padding: 7px 0;
+				}
+
+				.capabilities>div,
+				.capabilities>div:first-child {
+					border: 0;
+					padding: 16px 0;
+				}
+
+				.capabilities>div+div {
+					border-top: 1px solid #252229;
+				}
+
+				.capabilities p {
+					margin-top: 2px;
+				}
+
+				.content-section {
+					padding: 50px 0;
+				}
+
+				.section-heading {
+					align-items: flex-start;
+					flex-direction: column;
+					gap: 14px;
+					margin-bottom: 27px;
+				}
+
+				.quickstart-grid {
+					grid-template-columns: 1fr;
+					gap: 32px;
+				}
+
+				.patterns-section,
+				.source-section {
+					grid-template-columns: 1fr;
+					gap: 30px;
+				}
+
+				.pattern-intro h2 br {
+					display: none;
+				}
+
+				.pattern-intro p:not(.eyebrow) {
+					max-width: 520px;
+					margin: 16px 0;
+				}
+
+				.source-section {
+					padding: 45px 0;
+				}
+
+				.site-footer {
+					flex-direction: column;
+					gap: 12px;
+				}
+
+				.site-footer>div {
+					justify-content: space-between;
+					gap: 10px;
+				}
+			}
+
+			@media (max-width: 390px) {
+				.page-shell {
+					padding: 0 18px;
+				}
+
+				.brand img {
+					width: 92px;
+				}
+
+				nav {
+					gap: 13px;
+					font-size: .75rem;
+				}
+
+				.onion-result {
+					padding: 20px;
+				}
+
+				.onion-host {
+					font-size: 1.4rem;
+				}
+
+				.result-heading h2 {
+					font-size: .75rem;
+				}
+
+				.hero-meta {
+					font-size: .75rem;
+				}
+
+				.hero-meta span {
+					padding: 0 3px;
+				}
+
+				td:first-child {
+					padding-right: 12px;
+				}
+
+				td,
+				td code {
+					font-size: .8125rem;
+				}
+
+				.step-platform {
+					font-size: .75rem;
+				}
+			}
+
+			@media (max-width: 540px) {
+				nav a[href="#start"] {
+					display: none;
+				}
+
+				.benchmark-figure figcaption {
+					flex-direction: column;
+					gap: 3px;
+				}
+
+				.benchmark-axis {
+					margin: 20px 0 0;
+				}
+
+				.benchmark-row {
+					grid-template-columns: minmax(0, 1fr) auto;
+					gap: 7px 14px;
+					padding: 10px 0;
+				}
+
+				.benchmark-miner span {
+					display: inline;
+					margin-left: 5px;
+				}
+
+				.benchmark-track {
+					grid-row: 2;
+					grid-column: 1 / -1;
+					height: 16px;
+				}
+
+				.benchmark-value {
+					grid-row: 1;
+					grid-column: 2;
+					font-size: .875rem;
+				}
+
+				.benchmark-controls {
+					gap: 10px;
+				}
+
+				.benchmark-control-label {
+					width: 100%;
+				}
+
+				.workload-selector button {
+					padding: 8px 9px;
+					font-size: .75rem;
+				}
+
+				.benchmark-hardware span {
+					margin: 0 4px;
+				}
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				html {
+					scroll-behavior: auto;
+				}
+
+				*,
+				*::before,
+				*::after {
+					transition: none !important;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<a class="skip-link" href="#main">Skip to content</a>
+		<div class="page-shell">
+			<header class="site-header">
+				<a class="brand" href="#" aria-label="onino home">
+					<svg xmlns="http://www.w3.org/2000/svg" viewBox="50 30 1000 225" width="142" height="32">
+						<defs>
+							<path id="letter-n" d="M0 0h31v17C43 3 60-4 81-4c37 0 59 24 59 63v73h-32V64c0-25-11-39-31-39-28 0-45 18-45 47v60H0Z" />
+							<path id="letter-o" fill-rule="evenodd" d="M74-4c46 0 77 27 77 69 0 43-31 71-77 71S-3 108-3 65C-3 23 28-4 74-4m0 29c-27 0-45 16-45 40 0 25 18 42 45 42 28 0 45-17 45-42 0-24-17-40-45-40" />
+						</defs>
+						<g>
+							<path fill="#719a35" d="M345 113c6-29-1-51-20-73 34 8 52 35 39 70Z" />
+							<path d="M350 112c-22-38-60-40-91-58 48-3 87 14 103 50Z" fill="#98bf60" />
+							<path d="M356 106c9-27 32-44 67-49-21 16-32 33-35 51l-19 14Z" fill="#98bf60" />
+							<path fill="#b178d3" d="M354 98c-12 14-35 19-63 24H106l46 17h108c-16 7-26 16-31 29H64l55 17h108c2 13 8 24 20 34H147l47 17h88c17 7 35 10 57 9 41-2 73-19 87-44 24-46-16-69-43-82-16-8-24-14-29-21" />
+							<path d="M353 119c-18 16-62 16-81 38-21 24-2 56 30 68 39 15 87-5 99-34 13-32-24-50-48-72" fill="#f3eedf" />
+							<path fill="#7d4698" d="M353 140c-16 13-47 11-64 29-15 16 0 36 23 43 27 9 60-4 69-23 10-20-14-35-28-49" />
+							<path d="M351 160c-13 10-33 6-42 20-11 16 15 25 35 19 22-7 23-20 7-39" fill="#f3eedf" />
+						</g>
+						<g fill="#f3eedf" transform="translate(457 106)skewX(-10)">
+							<use href="#letter-n" />
+							<path d="M181 0h32v132h-32Zm0-47h32v30h-32Z" />
+							<use x="251" href="#letter-n" />
+							<use x="433" href="#letter-o" />
+						</g>
+					</svg>
+				</a>
+				<nav aria-label="Main navigation">
+					<a href="#start">Quick start</a>
+					<a href="#benchmarks">Benchmarks</a>
+					<a href="https://github.com/coalaura/onino" class="nav-github">
+						GitHub
+						<svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" fill="currentColor">
+							<path d="M12 .75a11.25 11.25 0 0 0-3.56 21.92c.56.1.77-.24.77-.54v-2.1c-3.13.68-3.79-1.33-3.79-1.33-.51-1.3-1.25-1.65-1.25-1.65-1.02-.7.08-.68.08-.68 1.13.08 1.73 1.16 1.73 1.16 1 1.72 2.63 1.23 3.27.94.1-.73.4-1.23.71-1.52-2.5-.28-5.13-1.25-5.13-5.56 0-1.23.44-2.23 1.16-3.01-.12-.29-.5-1.43.11-2.98 0 0 .95-.3 3.1 1.15a10.82 10.82 0 0 1 5.64 0c2.15-1.46 3.1-1.15 3.1-1.15.61 1.55.23 2.69.11 2.98.72.78 1.16 1.78 1.16 3.01 0 4.32-2.63 5.27-5.14 5.55.4.35.76 1.03.76 2.09v3.1c0 .3.21.65.78.54A11.25 11.25 0 0 0 12 .75Z" />
+						</svg>
+					</a>
+				</nav>
+			</header>
+
+			<main id="main">
+				<section class="hero" aria-labelledby="hero-title">
+					<div class="hero-copy">
+						<p class="eyebrow">TOR V3 ADDRESS SEARCH</p>
+
+						<h1 id="hero-title">Vanity <span>.onion</span><br>addresses.</h1>
+						
+						<p class="hero-description">
+							Search for an address that matches your pattern. Use your CPU, add a Vulkan GPU and save Tor-compatible service keys.
+						</p>
+						
+						<div class="hero-actions">
+							<a class="button button-primary" href="#start">Get onino</a>
+							<a class="button button-secondary" href="https://github.com/coalaura/onino#readme">Read the docs</a>
+						</div>
+						
+						<a class="hero-performance" href="#benchmarks">
+							<strong>4.12 billion</strong> candidates/s
+						</a>
+						
+						<p class="hero-meta">
+							Open source <span aria-hidden="true">/</span> Written in Go <span aria-hidden="true">/</span> GPL-3.0
+						</p>
+					</div>
+
+					<aside class="onion-result" aria-labelledby="onion-title">
+						<div class="result-heading">
+							<h2 id="onion-title">THIS SITE'S ONION ADDRESS</h2><span class="result-index" aria-hidden="true">01</span>
+						</div>
+
+						<a class="onion-host" href="http://oninotoroexcwty725epcgcfzkc3kzktglmsyakucxkgqnqx7mpizryd.onion" aria-label="Open oninotoroexcwty725epcgcfzkc3kzktglmsyakucxkgqnqx7mpizryd.onion in Tor Browser">
+							<span class="host-line"><strong>oninotor</strong>oexcwty</span><span class="host-line">725epcgcfzkc3kz</span><span class="host-line">ktglmsyakucxkgq</span><span class="host-line">nqx7mpizryd<span class="onion-suffix">.onion</span></span>
+						</a>
+						
+						<div class="result-bottom">
+							<div>
+								<p class="result-label">Mined with onino in</p>
+								<p class="result-time">155.13<span>s</span></p>
+							</div>
+							
+							<button class="copy-button address-copy" type="button" data-copy="oninotoroexcwty725epcgcfzkc3kzktglmsyakucxkgqnqx7mpizryd.onion" hidden>Copy address</button>
+						</div>
+						
+						<p class="tor-note">Open with Tor Browser.</p>
+					</aside>
+				</section>
+
+				<div class="capabilities" aria-label="Capabilities">
+					<div>
+						<span class="capability-number">01</span>
+
+						<div>
+							<h2>CPU search</h2>
+							<p>One worker or all available cores.</p>
+						</div>
+					</div>
+					<div>
+						<span class="capability-number">02</span>
+
+						<div>
+							<h2>Optional GPU</h2>
+							<p>Vulkan acceleration for prefixes.</p>
+						</div>
+					</div>
+					<div>
+						<span class="capability-number">03</span>
+
+						<div>
+							<h2>Usable keys</h2>
+							<p>Verified, Tor-compatible output.</p>
+						</div>
+					</div>
+				</div>
+
+				<section id="benchmarks" class="content-section benchmark-section" aria-labelledby="benchmark-title">
+					<div class="section-heading">
+						<div>
+							<p class="eyebrow">BENCHMARKS</p>
+
+							<h2 id="benchmark-title">Fastest in all four tested workloads.</h2>
+						</div>
+
+						<a class="text-link" href="https://github.com/coalaura/onino#benchmarks">Full methodology</a>
+					</div>
+
+					<p class="benchmark-intro">
+						onino leads the CPU-only and CPU + GPU comparisons against onionloom and mkp224o. These are project measurements on the same machine.
+					</p>
+
+					<p class="benchmark-hardware">
+						Ryzen 9 9950X3D <span>/</span> 32 CPU workers <span>/</span> RTX 5090 for GPU runs <span>/</span> Windows 11
+					</p>
+
+					<div class="benchmark-controls"><span class="benchmark-control-label">Prefix</span>
+						<div class="workload-selector" role="group" aria-label="Benchmark workload" hidden>
+							<button type="button" data-workload="hello" aria-pressed="false">hello</button>
+							<button type="button" data-workload="privacy" aria-pressed="true" class="selected">privacy</button>
+							<button type="button" data-workload="multiple" aria-pressed="false">donate / mirror / secure</button>
+							<button type="button" data-workload="rare" aria-pressed="false">somethingrare</button>
+						</div>
+
+						<noscript><code>privacy</code></noscript>
+					</div>
+
+					<figure class="benchmark-figure" aria-labelledby="benchmark-caption">
+						<figcaption id="benchmark-caption">
+							<span>Median throughput . million candidates/s</span>
+							<span>Higher is better</span>
+						</figcaption>
+
+						<div class="benchmark-axis" aria-hidden="true">
+							<span>0</span>
+							<span>1,500</span>
+							<span>3,000</span>
+							<span>4,500</span>
+						</div>
+
+						<div class="benchmark-group">
+							<h3>CPU + GPU</h3>
+
+							<div class="benchmark-row benchmark-row-best" data-series="oninoGPU">
+								<div class="benchmark-miner">onino <span>AVX-512 + Vulkan</span></div>
+
+								<div class="benchmark-track" aria-hidden="true">
+									<div class="benchmark-bar" style="width:91.553333%"></div>
+								</div>
+
+								<div class="benchmark-value">4,119.9</div>
+							</div>
+							<div class="benchmark-row" data-series="onionloomGPU">
+								<div class="benchmark-miner">onionloom <span>GPU forced</span></div>
+
+								<div class="benchmark-track" aria-hidden="true">
+									<div class="benchmark-bar" style="width:9.377778%"></div>
+								</div>
+
+								<div class="benchmark-value">422.0</div>
+							</div>
+						</div>
+						<div class="benchmark-group">
+							<h3>CPU only</h3>
+
+							<div class="benchmark-row benchmark-row-onino" data-series="oninoCPU">
+								<div class="benchmark-miner">onino <span>AVX-512</span></div>
+
+								<div class="benchmark-track" aria-hidden="true">
+									<div class="benchmark-bar" style="width:29.424444%"></div>
+								</div>
+
+								<div class="benchmark-value">1,324.1</div>
+							</div>
+							<div class="benchmark-row benchmark-row-onino" data-series="oninoScalar">
+								<div class="benchmark-miner">onino <span>BMI2 + ADX</span></div>
+
+								<div class="benchmark-track" aria-hidden="true">
+									<div class="benchmark-bar" style="width:9.377778%"></div>
+								</div>
+
+								<div class="benchmark-value">422.0</div>
+							</div>
+							<div class="benchmark-row" data-series="onionloomCPU">
+								<div class="benchmark-miner">onionloom</div>
+
+								<div class="benchmark-track" aria-hidden="true">
+									<div class="benchmark-bar" style="width:7.671111%"></div>
+								</div>
+
+								<div class="benchmark-value">345.2</div>
+							</div>
+							<div class="benchmark-row" data-series="mkpCPU">
+								<div class="benchmark-miner">mkp224o</div>
+
+								<div class="benchmark-track" aria-hidden="true">
+									<div class="benchmark-bar" style="width:2.895556%"></div>
+								</div>
+
+								<div class="benchmark-value">130.3</div>
+							</div>
+						</div>
+
+						<p class="benchmark-workload-note" id="benchmark-workload-note">
+							Prefix: privacy. Five samples per configuration; medians shown.
+						</p>
+					</figure>
+					<div class="benchmark-ratios" aria-live="polite" aria-atomic="true">
+						<div>
+							<strong id="gpu-ratio">9.76x</strong>
+							<p>onionloom throughput<span>CPU + GPU</span></p>
+						</div>
+						<div>
+							<strong id="cpu-ratio">3.84x</strong>
+							<p>onionloom throughput<span>CPU only . onino AVX-512</span></p>
+						</div>
+					</div>
+					<details class="benchmark-details">
+						<summary>Measurements and test conditions</summary>
+
+						<div class="benchmark-table-scroll" tabindex="0" role="region" aria-label="All benchmark medians">
+							<table class="benchmark-table">
+								<caption>Median throughput, million candidates/s</caption>
+								<thead>
+									<tr>
+										<th scope="col">Prefix</th>
+										<th scope="col">mkp224o<br>CPU</th>
+										<th scope="col">onionloom<br>CPU</th>
+										<th scope="col">onino<br>BMI2 + ADX</th>
+										<th scope="col">onino<br>AVX-512</th>
+										<th scope="col">onionloom<br>CPU + GPU</th>
+										<th scope="col">onino<br>CPU + GPU</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr>
+										<th scope="row">hello</th>
+										<td>129.5</td>
+										<td>343.4</td>
+										<td>419.6</td>
+										<td>1,280.6</td>
+										<td>419.3</td>
+										<td>3,981.5</td>
+									</tr>
+									<tr>
+										<th scope="row">privacy</th>
+										<td>130.3</td>
+										<td>345.2</td>
+										<td>422.0</td>
+										<td>1,324.1</td>
+										<td>422.0</td>
+										<td>4,119.9</td>
+									</tr>
+									<tr>
+										<th scope="row">donate / mirror / secure</th>
+										<td>111.2</td>
+										<td>332.8</td>
+										<td>410.7</td>
+										<td>1,303.3</td>
+										<td>408.3</td>
+										<td>4,084.7</td>
+									</tr>
+									<tr>
+										<th scope="row">somethingrare</th>
+										<td>130.4</td>
+										<td>345.1</td>
+										<td>422.3</td>
+										<td>1,320.1</td>
+										<td>421.7</td>
+										<td>4,114.2</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+						<p>
+							Five samples per configuration and workload, with roughly 20-22-second measurement windows after warm-up.
+							Throughput uses candidate-count deltas over wall time; GPU setup and tuning are excluded. Runs use normal
+							key-file output. The somethingrare workload produced no matches, so it measures search without match-saving I/O.
+						</p>
+						<p>
+							Tested: onino v0.3.0 (PACE Go 1.27.1, PGO off), onionloom v1.0.1 and mkp224o v1.7.0. Onino and onionloom CPU + GPU
+							measurements are from 8 October 2026; competitor CPU-only measurements are retained from 6 October. Fresh
+							configurations ran in blocks with some alternating runs, rather than a fully interleaved comparison. Both GPU
+							configurations used NVIDIA driver 616.64.
+						</p>
+						<p>
+							The repository's historical "AVX2" series used BMI2 + ADX field arithmetic; it is labeled accordingly here.
+							All bars share a zero-based scale. Ratios compare matching CPU-only or CPU + GPU configurations. Results apply
+							to these versions, workloads and hardware.
+						</p>
+						<div class="benchmark-source-links">
+							<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/prefix-comparison.csv">Raw samples</a>
+							<a class="text-link" href="https://github.com/coalaura/onino#benchmarks">Ranges and methodology</a>
+							<a class="text-link" href="https://github.com/coalaura/onino#linux-single-worker-rare-prefix-runs">Linux single-worker results</a>
+						</div>
+					</details>
+
+					<section class="machine-benchmarks" aria-labelledby="machine-title">
+						<p class="eyebrow">SERVER / VPS / LAPTOP</p>
+
+						<h3 id="machine-title">Ahead on all three additional machines.</h3>
+
+						<p class="benchmark-intro">
+							onino also leads onionloom on an Intel server, a Haswell-class VPS and an AMD laptop. Each uses one CPU worker and automatic backend selection.
+						</p>
+
+						<p class="benchmark-hardware">Linux <span>/</span> One pinned CPU worker <span>/</span> GPU disabled <span>/</span> Prefix: rareprefix</p>
+
+						<div class="machine-grid">
+							<article class="machine-result" aria-labelledby="server-title">
+								<p class="machine-category">BARE-METAL SERVER</p>
+
+								<h4 id="server-title">Intel Xeon E5-1650 v4</h4>
+
+								<p class="machine-system">Debian 12 . 3.60 GHz</p>
+								<p class="machine-backend">Auto / BMI2 + ADX</p>
+
+								<div class="machine-ratio">
+									<strong>1.16x</strong>
+									<span>onionloom throughput</span>
+								</div>
+
+								<dl class="machine-rates">
+									<div>
+										<dt>onino</dt>
+										<dd>10.5</dd>
+									</div>
+									<div>
+										<dt>onionloom</dt>
+										<dd>9.04</dd>
+									</div>
+								</dl>
+
+								<p class="machine-unit">Million candidates/s . reported medians</p>
+							</article>
+							<article class="machine-result" aria-labelledby="vps-title">
+								<p class="machine-category">VIRTUAL SERVER</p>
+
+								<h4 id="vps-title">Intel Haswell-class guest</h4>
+
+								<p class="machine-system">Ubuntu 24.04.5 LTS . 4 vCores</p>
+								<p class="machine-backend">Auto / BMI2</p>
+
+								<div class="machine-ratio"><strong>1.16x</strong><span>onionloom throughput</span></div>
+
+								<dl class="machine-rates">
+									<div>
+										<dt>onino</dt>
+										<dd>8.19</dd>
+									</div>
+									<div>
+										<dt>onionloom</dt>
+										<dd>7.05</dd>
+									</div>
+								</dl>
+
+								<p class="machine-unit">Million candidates/s . reported medians</p>
+							</article>
+							<article class="machine-result" aria-labelledby="laptop-title">
+								<p class="machine-category">LAPTOP</p>
+
+								<h4 id="laptop-title">AMD Ryzen 7 7840U</h4>
+
+								<p class="machine-system">CachyOS . HP Pavilion</p>
+								<p class="machine-backend">Auto / AVX-512 IFMA</p>
+
+								<div class="machine-ratio"><strong>3.75x</strong><span>onionloom throughput</span></div>
+
+								<dl class="machine-rates">
+									<div>
+										<dt>onino</dt>
+										<dd>45.5</dd>
+									</div>
+									<div>
+										<dt>onionloom</dt>
+										<dd>12.13</dd>
+									</div>
+								</dl>
+
+								<p class="machine-unit">Million candidates/s . reported medians</p>
+							</article>
+						</div>
+
+						<p class="machine-method-note">
+							One run per configuration. These medians use progress reports: onino reports recent five-second rates; onionloom reports cumulative averages.
+						</p>
+
+						<details class="benchmark-details">
+							<summary>All backends, ranges and test conditions</summary>
+
+							<div class="benchmark-table-scroll" tabindex="0" role="region" aria-label="Linux machine results for automatic and forced backends">
+								<table class="benchmark-table machine-table">
+									<caption>Million candidates/s . median [min-max]</caption>
+									<thead>
+										<tr>
+											<th scope="col">Machine</th>
+											<th scope="col">onino backend</th>
+											<th scope="col">onino</th>
+											<th scope="col">onionloom</th>
+											<th scope="col">Ratio</th>
+										</tr>
+									</thead>
+									<tbody>
+										<tr>
+											<th scope="row">Debian server</th>
+											<td>Auto / BMI2 + ADX</td>
+											<td>10.5 [10.4-10.6]</td>
+											<td>9.04 [8.73-9.05]</td>
+											<td>1.16x</td>
+										</tr>
+										<tr>
+											<th scope="row">Ubuntu VPS</th>
+											<td>Auto / BMI2</td>
+											<td>8.19 [7.99-8.35]</td>
+											<td>7.05 [6.87-7.15]</td>
+											<td>1.16x</td>
+										</tr>
+										<tr>
+											<th scope="row">Ubuntu VPS</th>
+											<td>Forced / BMI2 + ADX</td>
+											<td>8.49 [8.40-8.60]</td>
+											<td>7.05 [6.87-7.15]</td>
+											<td>1.20x</td>
+										</tr>
+										<tr>
+											<th scope="row">CachyOS laptop</th>
+											<td>Auto / AVX-512 IFMA</td>
+											<td>45.5 [45.5-45.5]</td>
+											<td>12.13 [11.89-12.16]</td>
+											<td>3.75x</td>
+										</tr>
+										<tr>
+											<th scope="row">CachyOS laptop</th>
+											<td>Forced / BMI2 + ADX</td>
+											<td>16.5 [16.5-16.6]</td>
+											<td>12.13 [11.89-12.16]</td>
+											<td>1.36x</td>
+										</tr>
+									</tbody>
+								</table>
+							</div>
+
+							<p>
+								Each configuration ran once for one minute after a 20-second warm-up, pinned to logical CPU 0, with no
+								matches found. The laptop was plugged in with the performance power profile. Ratios compare medians of the
+								printed rates; the tools use different averaging windows. The same onionloom run supplies both backend
+								comparisons on the VPS and laptop.
+							</p>
+
+							<p>
+								The Xeon server has BMI2 and ADX, without AVX-512. The VPS reports a Haswell guest CPU with BMI2 but no ADX;
+								automatic selection used BMI2. The separate forced BMI2 + ADX run executed successfully despite that feature
+								report. The guest model does not identify the underlying physical processor. The Ryzen laptop supports
+								AVX-512 IFMA.
+							</p>
+
+							<p>
+								These project measurements include 148 progress samples across eight runs. Binary versions and build
+								commands were not recorded for the Linux runs.
+							</p>
+
+							<div class="benchmark-source-links">
+								<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/linux-rare-prefix-progress.csv">148 progress samples</a>
+								<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/linux-rare-prefix.csv">Run summaries and commands</a>
+								<a class="text-link" href="https://github.com/coalaura/onino#linux-single-worker-rare-prefix-runs">Full Linux methodology</a>
+							</div>
+						</details>
+					</section>
+				</section>
+
+				<section id="start" class="content-section start-section" aria-labelledby="start-title">
+					<div class="section-heading">
+						<div>
+							<p class="eyebrow">GET STARTED</p>
+							<h2 id="start-title">Run onino.</h2>
+						</div>
+
+						<a class="text-link" href="https://github.com/coalaura/onino/releases/latest">Download a release</a>
+					</div>
+
+					<div class="quickstart-grid">
+						<div class="quickstart-step">
+							<div class="step-title">
+								<span class="step-number">01 /</span>
+								<h3>Install</h3>
+								<span class="step-platform">Linux / macOS</span>
+							</div>
+							<div class="code-block">
+								<div class="code-toolbar">
+									<span>sh</span>
+									<button class="copy-button" type="button" data-copy-target="install-command" hidden>Copy</button>
+								</div>
+								<pre><code id="install-command">curl -fsSL https://src.ws2.sh/onino/install.sh | sh</code></pre>
+							</div>
+
+							<p class="step-description">Choose CPU or GPU when prompted. The installer verifies the release checksum.</p>
+
+							<a class="text-link subtle-link" href="https://github.com/coalaura/onino/releases/latest">Windows binaries and other downloads</a>
+						</div>
+
+						<div class="quickstart-step">
+							<div class="step-title">
+								<span class="step-number">02 /</span>
+								<h3>Start searching</h3>
+							</div>
+							<div class="code-block search-block">
+								<div class="code-toolbar">
+									<div class="mode-selector" role="group" aria-label="Search mode">
+										<button type="button" class="mode-button active" aria-pressed="true" data-mode="cpu">CPU</button>
+										<button type="button" class="mode-button" aria-pressed="false" data-mode="gpu" hidden>CPU + GPU</button>
+									</div>
+
+									<button class="copy-button" type="button" data-copy-target="search-command" hidden>Copy</button>
+								</div>
+								<pre><code id="search-command">onino --cpu all 'hello.'</code></pre>
+							</div>
+
+							<p class="step-description" id="search-description">Find addresses beginning with hello using all CPU workers. Matches are saved under matches/.</p>
+							<p class="step-footnote" id="search-footnote">Search continues until you press Ctrl+C.</p>
+						</div>
+					</div>
+
+					<div class="output-note">
+						<span class="output-label">EVERY SAVED MATCH</span>
+						<div>
+							<code>hostname</code><code>hs_ed25519_public_key</code><code>hs_ed25519_secret_key</code>
+						</div>
+					</div>
+				</section>
+
+				<section id="patterns" class="content-section patterns-section" aria-labelledby="patterns-title">
+					<div class="pattern-intro">
+						<p class="eyebrow">PATTERN SYNTAX</p>
+
+						<h2 id="patterns-title">Search patterns.</h2>
+
+						<p>Match a prefix, a suffix or text in between. Pass multiple patterns to search for any of them.</p>
+						<a class="text-link" href="https://github.com/coalaura/onino/blob/master/internal/pattern/README.md">Full matcher reference</a>
+					</div>
+
+					<div class="pattern-reference">
+						<table>
+							<caption class="sr-only">Supported CPU search patterns</caption>
+							<thead>
+								<tr>
+									<th scope="col">Pattern</th>
+									<th scope="col">Matches</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr>
+									<td><code>hello<span>.</span></code></td>
+									<td>Starts with hello</td>
+								</tr>
+								<tr>
+									<td><code><span>.</span>hello</code></td>
+									<td>Ends with hello</td>
+								</tr>
+								<tr>
+									<td><code>hello<span>.</span>world</code></td>
+									<td>Starts with hello, ends with world</td>
+								</tr>
+								<tr>
+									<td><code><span>.</span>hello<span>.</span></code></td>
+									<td>Contains hello strictly inside</td>
+								</tr>
+								<tr>
+									<td><code>hello</code></td>
+									<td>Contains hello anywhere</td>
+								</tr>
+							</tbody>
+						</table>
+						<p class="pattern-note">
+							Patterns use <code>a-z</code> and <code>2-7</code> and match the first 52 hostname characters. Suffixes end at
+							character 52, before the last four characters. GPU search accepts 1-8 literal prefixes only.
+						</p>
+					</div>
+				</section>
+
+				<section class="source-section" aria-labelledby="source-title">
+					<div>
+						<p class="eyebrow">SOURCE & RESEARCH</p>
+
+						<h2 id="source-title">Read the source.</h2>
+
+						<p>Implementation, measurements and the experiments behind the search engine.</p>
+					</div>
+					<div class="source-links">
+						<a href="https://github.com/coalaura/onino">Source code<span>GitHub</span></a>
+						<a href="https://github.com/coalaura/onino/blob/master/RESEARCH.md">CPU research<span>Arithmetic & matching</span></a>
+						<a href="https://github.com/coalaura/onino/blob/master/RESEARCH-GPU.md">GPU research<span>Vulkan & calibration</span></a>
+					</div>
+				</section>
+			</main>
+
+			<footer class="site-footer">
+				<p>
+					<a href="https://github.com/coalaura/onino">onino</a>
+					<span class="footer-divider" aria-hidden="true">/</span>by
+					<a href="https://github.com/coalaura">coalaura</a>
+				</p>
+
+				<div>
+					<a href="https://github.com/coalaura/onino/blob/master/LICENSE">GPL-3.0</a>
+					<span class="footer-note">Independent of the Tor Project.</span>
+				</div>
+			</footer>
+		</div>
+
+		<div id="copy-status" class="copy-status" role="status" aria-live="polite"></div>
+
+		<script>
+			(() => {
+				"use strict";
+
+				const copyStatus = document.getElementById("copy-status");
+
+				let statusTimeout;
+
+				function announce(message) {
+					clearTimeout(statusTimeout);
+
+					copyStatus.textContent = message;
+					copyStatus.classList.add("visible");
+
+					statusTimeout = setTimeout(() => copyStatus.classList.remove("visible"), 3500);
+				}
+
+				async function copyText(text) {
+					if (navigator.clipboard && window.isSecureContext) {
+						try {
+							await navigator.clipboard.writeText(text);
+
+							return true;
+						} catch {}
+					}
+
+					const previousFocus = document.activeElement,
+						textarea = document.createElement("textarea");
+
+					textarea.value = text;
+					textarea.readOnly = true;
+					textarea.setAttribute("aria-label", "Text to copy");
+					textarea.style.cssText = "position:fixed;top:0;left:-9999px;";
+
+					document.body.appendChild(textarea);
+
+					textarea.select();
+
+					let copied = false;
+
+					try {
+						copied = document.execCommand("copy");
+					} catch {
+						copied = false;
+					}
+
+					textarea.remove();
+
+					previousFocus?.focus({ preventScroll: true });
+
+					return copied;
+				}
+
+				document.querySelectorAll("[data-copy], [data-copy-target]").forEach((button) => {
+					button.hidden = false;
+
+					button.addEventListener("click", async () => {
+						const text = button.dataset.copy || document.getElementById(button.dataset.copyTarget).textContent,
+							copied = await copyText(text);
+
+						announce(copied ? (button.dataset.copy ? "Address copied." : "Command copied.") : "Copy unavailable. Select the text to copy it manually.");
+					});
+				});
+
+				const command = document.getElementById("search-command"),
+					description = document.getElementById("search-description"),
+					footnote = document.getElementById("search-footnote"),
+					modes = document.querySelectorAll("[data-mode]");
+
+				modes.forEach((button) => {
+					button.hidden = false;
+
+					button.addEventListener("click", () => {
+						const useGPU = button.dataset.mode === "gpu";
+
+						modes.forEach((mode) => {
+							const selected = mode === button;
+
+							mode.classList.toggle("active", selected);
+							mode.setAttribute("aria-pressed", String(selected));
+						});
+
+						command.textContent = useGPU ? `onino --cpu all --gpu auto "hello."` : `onino --cpu all "hello."`;
+
+						description.textContent = useGPU
+							? "Find addresses beginning with hello using CPU workers and a compatible GPU. Matches are saved under matches/."
+							: "Find addresses beginning with hello using all CPU workers. Matches are saved under matches/.";
+
+							footnote.textContent = useGPU
+							? "Requires a GPU build and compatible Vulkan 1.3 driver."
+							: "Search continues until you press Ctrl+C.";
+					});
+				});
+
+				const workloads = {
+					hello: { label: "hello", oninoGPU: 3981.5, onionloomGPU: 419.3, oninoCPU: 1280.6, oninoScalar: 419.6, onionloomCPU: 343.4, mkpCPU: 129.5 },
+					privacy: { label: "privacy", oninoGPU: 4119.9, onionloomGPU: 422.0, oninoCPU: 1324.1, oninoScalar: 422.0, onionloomCPU: 345.2, mkpCPU: 130.3 },
+					multiple: { label: "donate / mirror / secure (any prefix)", oninoGPU: 4084.7, onionloomGPU: 408.3, oninoCPU: 1303.3, oninoScalar: 410.7, onionloomCPU: 332.8, mkpCPU: 111.2 },
+					rare: { label: "somethingrare (no matches)", oninoGPU: 4114.2, onionloomGPU: 421.7, oninoCPU: 1320.1, oninoScalar: 422.3, onionloomCPU: 345.1, mkpCPU: 130.4 }
+				};
+
+				const numberFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+					workloadButtons = document.querySelectorAll("[data-workload]"),
+					benchmarkRows = document.querySelectorAll("[data-series]");
+
+				document.querySelector(".workload-selector").hidden = false;
+
+				workloadButtons.forEach((button) => {
+					button.addEventListener("click", () => {
+						const workload = workloads[button.dataset.workload];
+
+						workloadButtons.forEach((option) => {
+							const selected = option === button;
+
+							option.classList.toggle("selected", selected);
+							option.setAttribute("aria-pressed", String(selected));
+						});
+
+						benchmarkRows.forEach((row) => {
+							const value = workload[row.dataset.series];
+
+							row.querySelector(".benchmark-bar").style.width = `${value / 4500 * 100}%`;
+							row.querySelector(".benchmark-value").textContent = numberFormat.format(value);
+						});
+
+						document.getElementById("gpu-ratio").textContent = `${(workload.oninoGPU / workload.onionloomGPU).toFixed(2)}x`;
+						document.getElementById("cpu-ratio").textContent = `${(workload.oninoCPU / workload.onionloomCPU).toFixed(2)}x`;
+
+						document.getElementById("benchmark-workload-note").textContent = `Prefix: ${workload.label}. Five samples per configuration; medians shown.`;
+					});
+				});
+			})();
+		</script>
+	</body>
+</html>
