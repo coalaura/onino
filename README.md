@@ -90,39 +90,42 @@ CPU workers usually generate paired candidates around 256 independent affine Edw
 
 ## Benchmarks
 
-CPU-only prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 workers** and normal key-file output. `--simd auto` (AVX-512 on this CPU) was refreshed for onino v0.2.1; forced AVX2 and competitor results are retained from the previous comparison. Onionloom used `--gpu off`. Rates are **million candidates/second**; higher is better.
+Prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 CPU workers**, an **NVIDIA GeForce RTX 5090** for CPU+GPU runs, and normal key-file output. Onino CPU-only AVX2, CPU-only AVX-512 and AVX-512+GPU results are freshly measured, alongside onionloom CPU+GPU. Onionloom and mkp224o CPU-only results are retained from the previous comparison. Rates are **million candidates/second**; higher is better.
 
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/prefix-comparison.svg">
 	<source media="(prefers-color-scheme: light)" srcset=".github/prefix-comparison-light.svg">
-	<img alt="Median CPU-only throughput for onino AVX2, onino auto, onionloom and mkp224o across four prefix workloads, including a no-match case, on a shared zero-based scale." src=".github/prefix-comparison-light.svg">
+	<img alt="Median throughput for mkp224o CPU, onionloom CPU, onino CPU AVX2, onino CPU AVX-512, onionloom CPU+GPU and onino AVX-512+GPU across four prefix workloads, including a no-match case, on a shared zero-based scale." src=".github/prefix-comparison-light.svg">
 </picture>
 
 **Median throughput**
 
-| Prefixes | onino AVX2 | onino auto | onionloom | mkp224o |
-| --- | ---: | ---: | ---: | ---: |
-| `hello` | 416.4 | **1,249.4** | 343.4 | 129.5 |
-| `privacy` | 422.9 | **1,290.5** | 345.2 | 130.3 |
-| `donate`, `mirror`, `secure` | 413.8 | **1,269.2** | 332.8 | 111.2 |
-| `somethingrare` (no matches) | 422.9 | **1,289.0** | 345.1 | 130.4 |
+| Prefixes | mkp224o CPU | onionloom CPU | onino CPU AVX2 | onino CPU AVX-512 | onionloom CPU+GPU | onino AVX-512+GPU |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `hello` | 129.5 | 343.4 | 419.6 | 1,280.6 | 419.3 | **3,981.5** |
+| `privacy` | 130.3 | 345.2 | 422.0 | 1,324.1 | 422.0 | **4,119.9** |
+| `donate`, `mirror`, `secure` | 111.2 | 332.8 | 410.7 | 1,303.3 | 408.3 | **4,084.7** |
+| `somethingrare` (no matches) | 130.4 | 345.1 | 422.3 | 1,320.1 | 421.7 | **4,114.2** |
 
 **Min-max throughput**
 
-| Prefixes | onino AVX2 | onino auto | onionloom | mkp224o |
-| --- | ---: | ---: | ---: | ---: |
-| `hello` | 409.4-422.0 | 1,229.6-1,268.5 | 338.6-345.2 | 129.0-130.3 |
-| `privacy` | 419.2-424.8 | 1,242.8-1,303.0 | 341.7-345.8 | 129.5-131.4 |
-| `donate`, `mirror`, `secure` | 408.1-416.2 | 1,264.4-1,286.6 | 330.1-334.6 | 110.6-112.5 |
-| `somethingrare` (no matches) | 418.2-423.7 | 1,278.1-1,305.8 | 338.3-345.6 | 129.5-131.2 |
+| Prefixes | mkp224o CPU | onionloom CPU | onino CPU AVX2 | onino CPU AVX-512 | onionloom CPU+GPU | onino AVX-512+GPU |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `hello` | 129.0-130.3 | 338.6-345.2 | 416.1-420.9 | 1,280.5-1,284.8 | 407.5-420.6 | 3,904.0-4,019.7 |
+| `privacy` | 129.5-131.4 | 341.7-345.8 | 421.5-425.3 | 1,319.9-1,334.0 | 420.8-426.3 | 4,085.7-4,144.4 |
+| `donate`, `mirror`, `secure` | 110.6-112.5 | 330.1-334.6 | 406.8-411.4 | 1,277.5-1,309.1 | 405.3-410.7 | 4,014.4-4,094.8 |
+| `somethingrare` (no matches) | 129.5-131.2 | 338.3-345.6 | 421.7-423.5 | 1,316.7-1,324.5 | 406.1-423.9 | 4,055.0-4,139.3 |
 
-Each configuration has five samples per workload, run sequentially with all 32 logical CPUs available. The original comparison rotated tool order; the v0.2.1 refresh ran only auto mode. Timed windows lasted 20-32 seconds after warm-up, bounded by progress reports; rates use cumulative candidate-count deltas over wall time, not peak displayed rates. Multiple prefixes match any listed prefix. The 13-character `somethingrare` prefix produced **zero matches and zero key files in every run**, isolating search throughput from match-saving I/O. Incomplete trials were excluded and rerun; four refreshed `hello` samples used temporary key-output directories after filesystem rename failures. [Raw samples](.github/prefix-comparison.csv) are available.
+Each configuration has five samples per workload, run sequentially with all 32 logical CPUs available. The original comparison rotated tool order; fresh samples were collected in configuration blocks with some alternating runs. Timed windows lasted approximately 20-22 seconds after warm-up, bounded by progress reports; fresh samples used approximately 20-second windows after at least 15 seconds of warm-up, excluding GPU setup and automatic tuning. Rates use cumulative candidate-count deltas over measured wall time, not peak displayed rates. Onino's current progress counters are rounded to three significant digits, so its derived rates include that quantization. Multiple prefixes match any listed prefix. The 13-character `somethingrare` prefix produced **zero matches and zero key files in every run**, isolating search throughput from match-saving I/O. [Raw samples](.github/prefix-comparison.csv) are available.
 
-Tested versions (2026-10-06):
+Onino CPU-only runs used `--cpu all --gpu off`, with `--simd avx2` for AVX2 and the default `--simd auto` for AVX-512 on this host. Its CPU+GPU runs used `--cpu all --gpu auto` with automatic SIMD (AVX-512) and default GPU workload tuning. Onionloom CPU+GPU used `--workers 32 --gpu force --continuous`: `--gpu auto` declines GPU use for some of these prefixes, so forced GPU mode ensures every combined sample actually used both backends. Retained onionloom CPU-only samples used `--gpu off`; mkp224o used `-t 32`.
 
-- onino v0.2.1 auto / [v0.2.0](https://github.com/coalaura/onino/releases/tag/v0.2.0) AVX2 - PACE Go 1.27.1, `GOAMD64=v1`, PGO disabled.
+Tested versions (fresh samples: 2026-10-08; retained CPU-only competitors: 2026-10-06):
+
+- [onino v0.3.0](https://github.com/coalaura/onino/releases/tag/v0.3.0) - PACE Go 1.27.1, `GOAMD64=v1`, PGO disabled; the same GPU-enabled, dynamically linked CGO binary was used for all onino configurations.
 - [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom/releases/tag/v1.0.1) - official Windows release.
 - [mkp224o v1.7.0](https://github.com/cathugger/mkp224o/releases/tag/v1.7.0) - official Windows release.
+- NVIDIA driver 616.64 for both CPU+GPU configurations.
 
 ## Optimization history
 
