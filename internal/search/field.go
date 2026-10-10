@@ -79,7 +79,7 @@ func (result *fieldElement) squareWith(source *fieldElement, mode simd.Mode) {
 	case simd.BMI2:
 		squareBMI2Only(result, source)
 	default:
-		multiplyGeneric(result, source, source)
+		squareGeneric(result, source)
 	}
 }
 
@@ -138,45 +138,107 @@ func (source *fieldElement) isNegative() byte {
 }
 
 func multiplyGeneric(result, left, right *fieldElement) {
-	var product [8]uint64
+	// A column has at most four products plus the preceding carry. Keep
+	// the third word explicitly: the sum can exceed 128 bits.
+	// Every input is consumed before storing the possibly aliased result.
+	middle, low := bits.Mul64(left[0], right[0])
+	product0 := low
+	low, middle, high := accumulateProduct(middle, 0, 0, left[0], right[1])
+	low, middle, high = accumulateProduct(low, middle, high, left[1], right[0])
+	product1 := low
+	low, middle, high = accumulateProduct(middle, high, 0, left[0], right[2])
+	low, middle, high = accumulateProduct(low, middle, high, left[1], right[1])
+	low, middle, high = accumulateProduct(low, middle, high, left[2], right[0])
+	product2 := low
+	low, middle, high = accumulateProduct(middle, high, 0, left[0], right[3])
+	low, middle, high = accumulateProduct(low, middle, high, left[1], right[2])
+	low, middle, high = accumulateProduct(low, middle, high, left[2], right[1])
+	low, middle, high = accumulateProduct(low, middle, high, left[3], right[0])
+	product3 := low
+	low, middle, high = accumulateProduct(middle, high, 0, left[1], right[3])
+	low, middle, high = accumulateProduct(low, middle, high, left[2], right[2])
+	low, middle, high = accumulateProduct(low, middle, high, left[3], right[1])
+	product4 := low
+	low, middle, high = accumulateProduct(middle, high, 0, left[2], right[3])
+	low, middle, high = accumulateProduct(low, middle, high, left[3], right[2])
+	product5 := low
+	// The complete product is below 2^512, so the final third word is zero.
+	low, middle, _ = accumulateProduct(middle, high, 0, left[3], right[3])
 
-	for leftIndex := range left {
-		var carry uint64
+	reduceProduct(result, product0, product1, product2, product3, product4, product5, low, middle)
+}
 
-		for rightIndex := range right {
-			high, low := bits.Mul64(left[leftIndex], right[rightIndex])
-			low, overflow := bits.Add64(low, product[leftIndex+rightIndex], 0)
-			high += overflow
-			low, overflow = bits.Add64(low, carry, 0)
-			high += overflow
-			product[leftIndex+rightIndex] = low
-			carry = high
-		}
+func squareGeneric(result, source *fieldElement) {
+	// Symmetric products need only ten multiplies, but doubled cross-products
+	// need 129 bits. The same 192-bit column bound applies as in multiplication.
+	middle, low := bits.Mul64(source[0], source[0])
+	product0 := low
+	low, middle, high := accumulateDoubleProduct(middle, 0, 0, source[0], source[1])
+	product1 := low
+	low, middle, high = accumulateDoubleProduct(middle, high, 0, source[0], source[2])
+	low, middle, high = accumulateProduct(low, middle, high, source[1], source[1])
+	product2 := low
+	low, middle, high = accumulateDoubleProduct(middle, high, 0, source[0], source[3])
+	low, middle, high = accumulateDoubleProduct(low, middle, high, source[1], source[2])
+	product3 := low
+	low, middle, high = accumulateDoubleProduct(middle, high, 0, source[1], source[3])
+	low, middle, high = accumulateProduct(low, middle, high, source[2], source[2])
+	product4 := low
+	low, middle, high = accumulateDoubleProduct(middle, high, 0, source[2], source[3])
+	product5 := low
+	// As in multiplication, no bit can survive beyond the eighth word.
+	low, middle, _ = accumulateProduct(middle, high, 0, source[3], source[3])
 
-		product[leftIndex+4] = carry
-	}
+	reduceProduct(result, product0, product1, product2, product3, product4, product5, low, middle)
+}
 
-	var (
-		folded fieldElement
-		carry  uint64
-	)
+func accumulateProduct(low, middle, high, left, right uint64) (uint64, uint64, uint64) {
+	productHigh, productLow := bits.Mul64(left, right)
+	low, carry := bits.Add64(low, productLow, 0)
+	middle, carry = bits.Add64(middle, productHigh, carry)
+	high += carry
 
-	for index := range folded {
-		high, low := bits.Mul64(product[index+4], 38)
-		low, overflow := bits.Add64(low, product[index], 0)
+	return low, middle, high
+}
 
-		high += overflow
+func accumulateDoubleProduct(low, middle, high, left, right uint64) (uint64, uint64, uint64) {
+	productHigh, productLow := bits.Mul64(left, right)
+	// Doubling a full-width product needs 129 bits, including this top bit.
+	top := productHigh >> 63
+	productHigh = productHigh<<1 | productLow>>63
+	productLow <<= 1
+	low, carry := bits.Add64(low, productLow, 0)
+	middle, carry = bits.Add64(middle, productHigh, carry)
+	high += top + carry
 
-		low, overflow = bits.Add64(low, carry, 0)
+	return low, middle, high
+}
 
-		high += overflow
+func multiplyAdd(left, right, word, carry uint64) (uint64, uint64) {
+	// A product plus two words is at most 2^128-1.
+	high, low := bits.Mul64(left, right)
+	low, overflow := bits.Add64(low, word, 0)
+	high += overflow
+	low, overflow = bits.Add64(low, carry, 0)
+	high += overflow
 
-		folded[index] = low
+	return low, high
+}
 
-		carry = high
-	}
+//go:inline
+func reduceProduct(result *fieldElement, product0, product1, product2, product3, product4, product5, product6, product7 uint64) {
+	first, carry := multiplyAdd(product4, 38, product0, 0)
+	second, carry := multiplyAdd(product5, 38, product1, carry)
+	third, carry := multiplyAdd(product6, 38, product2, carry)
+	fourth, carry := multiplyAdd(product7, 38, product3, carry)
 
-	correction := fieldElement{carry * 38, 0, 0, 0}
+	// The first fold leaves carry <= 38. After adding at most 1444,
+	// any overflow leaves a word below 1444, so the final 38 cannot carry.
+	first, carry = bits.Add64(first, carry*38, 0)
+	second, carry = bits.Add64(second, 0, carry)
+	third, carry = bits.Add64(third, 0, carry)
+	fourth, carry = bits.Add64(fourth, 0, carry)
+	first += carry * 38
 
-	result.add(&folded, &correction)
+	*result = fieldElement{first, second, third, fourth}
 }

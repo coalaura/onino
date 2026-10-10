@@ -192,7 +192,7 @@ func (state *pairedGenerator) prepare(offset *pairedAffine) {
 		multiplyGeneric(&scratch.b, &center.y, &offset.y)
 		multiplyGeneric(&scratch.c, &center.xy, &offset.xy)
 
-		multiplyGeneric(&scratch.denominator, &scratch.c, &scratch.c)
+		squareGeneric(&scratch.denominator, &scratch.c)
 		scratch.denominator.subtract(&pairedOne, &scratch.denominator)
 
 		if index == 0 {

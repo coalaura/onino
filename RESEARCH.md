@@ -46,6 +46,7 @@ The following map anchors the development narrative. It is not a common benchmar
 | Optional AVX-512 | `7bca9a8` → `35b17e5` | One-worker evidence only |
 | Fused paired generation/filtering | `e743e57666d31ea963bcfbd66fa186708853181e` → `1c2f274` | Follow-up to AVX-512, with unresolved small control regressions |
 | BMI2-only arithmetic and explicit selection | Preserved `56d8ff7eb8e147b605cc812afaa2e27c9d09311b` → current implementation | Pinned local comparison; no Haswell or remote validation |
+| PACE pure-Go arithmetic | Preserved `0c166c764c57a12ce88f5c8d2d35b9f4c45ebbe9` → four-limb column multiplication and symmetric squaring | `purego` excludes all onino assembly; separate stock-Go and normal-build controls |
 
 Earlier bounded screens do not always record a complete protocol or exact source identifier. Missing details are identified as limits, not inferred from later studies. In particular, the old suffix and all-hit results below must not be pooled with visible-character-52 results and the historical multicore rates do not measure the AVX-512 implementation.
 
@@ -81,7 +82,7 @@ The 256 centers share one inversion of the product of `1-c²`. Both reconstructe
 
 These denominators are nonzero for valid affine points over this field: `a` is a square and `d` is a nonsquare, the complete twisted-Edwards addition case. Tests include identity order-two/order-four points, positive/negative offsets and independently multiplied search keys. The field-character assumptions are also checked with `math/big`.
 
-Write `M`, `S` and `I` for field multiplication, squaring and inversion. One pair costs approximately **9M+1S**, plus **I/256 pairs**: three cached-coordinate products, one square, three multiplications for batch inversion, one shared reciprocal product and two Y products. The batch endpoints save three multiplications overall. This is 4.5M+0.5S per generated candidate before byte serialization and matching; sign recovery adds 3M only for filter survivors. Both BMI2-only and BMI2+ADX denominator preparation use dedicated squaring; portable squaring uses multiplication.
+Write `M`, `S` and `I` for field multiplication, squaring and inversion. One pair costs approximately **9M+1S**, plus **I/256 pairs**: three cached-coordinate products, one square, three multiplications for batch inversion, one shared reciprocal product and two Y products. The batch endpoints save three multiplications overall. This is 4.5M+0.5S per generated candidate before byte serialization and matching; sign recovery adds 3M only for filter survivors. BMI2-only, BMI2+ADX and portable denominator preparation use dedicated squaring; the [pure-Go study](#pace-pure-go-arithmetic) replaced portable multiplication-based squaring.
 
 Every 64 offsets, centers advance by `129.8B`, sharing another inversion. A transition costs approximately 12M+1S per center, amortized across 128 candidates. Full-search timings include these transitions, sign completion, statistics, copying saved keys, discarded relatives and independent reseeding. Reseeding includes entropy acquisition, SHA-512, clamping/headroom checks, base multiplication, affine normalization and rebuilding the cached product.
 
@@ -300,6 +301,198 @@ Canonical four-limb inputs convert to five signed radix-62 limbs. Ten groups of 
 
 Including both representation conversions, the initial five-sample screen reduced inversion from 1705 to 1215 ns/op. Ten-sample confirmation against the retained fingerprint version measured **1704 [1702,1711]→1215 [1214,1219] ns/op**, with rare/frequent/ordinary/shared searches improving 40.25→39.28, 49.41→48.55, 63.06→62.10 and 62.66→61.70 ns/key. Anchored and long-literal searches also improved. Small fallback regressions in the initial binary disappeared in confirmation; allocation counts stayed zero. These complete-search gains justified retaining the bounded implementation. Inversion adds stack-local working state and a 40-byte modulus constant, with no per-worker persistent storage.
 
+### PACE pure-Go arithmetic
+
+This study started from clean **`0c166c764c57a12ce88f5c8d2d35b9f4c45ebbe9`**, preserving CLI and search-test executables before editing. It targets Go source compiled with PACE and `-tags=purego`, with **no onino-owned assembly anywhere in the measured search**. Standard-library and existing dependency implementations remain permitted. No arithmetic was moved into a dependency and no assembly, cgo, machine-code buffers, ABI bridges, compiler changes or dependencies were added.
+
+#### Protocol and assembly exclusion
+
+The machine was Windows/amd64 on an AMD Ryzen 9 9950X3D. Both toolchains reported Go 1.27.1, with the PACE build identified as `(pace)`. Every process inherited affinity to logical CPU 2, mask 4, with `GOMAXPROCS=1`, `GOAMD64=v1`, `CGO_ENABLED=0`, one search worker and `-pgo=off` unless explicitly labeled PGO. Builds, tests, profiles and timed runs were sequential. No GPU, remote host or onionloom workload was run. Architecture/compiler settings were identical within every source comparison.
+
+`pace list -tags=purego` selected empty `SFiles` for every onino package, including arithmetic/generation, matching, checksum and CPU feature detection. Targeted CLI symbol inspection found no linked onino BMI2/IFMA, CPUID/XGETBV, assembly Keccak or AVX matcher implementations. Disassembly of the hot arithmetic confirmed compiler-emitted integer instructions and Go calls, with no route into an onino assembly helper. The normal-build `--simd portable` control is distinct: it forces portable curve arithmetic but can retain independently selected matching and checksum acceleration.
+
+Cheap screens used two alternating order-reversed pairs of 0.8-1 second complete-search samples. Final PACE and stock-Go comparisons used **five alternating pairs, two seconds per benchmark per executable**, reversing order on every second pair. Separate five-pair, five-second rare-prefix confirmations investigated first-benchmark variability in stock Go and native controls. All samples, including the noisy ones, remain represented below; ranges are minima/maxima, not confidence intervals. Profiles were collected in separate four-second runs and never used as throughput samples.
+
+`BenchmarkFullSearch` includes matching, sign recovery, transitions, hit snapshots and reseeding; its deterministic SHAKE entropy and cheap save callback exclude OS entropy, disk persistence and startup. `BenchmarkSuffixCosts/.../reseed_shake` supplies complete checksum-dependent and independent-walk coverage; `matching_only` was not substituted. Every retained-version and baseline sample in these non-PGO comparisons reported **0 B/op and 0 allocs/op**. Real CLI searches, described separately below, include initialization, real entropy, the saver queue, filesystem writes and graceful cancellation.
+
+#### Bottleneck, implementation and arithmetic bounds
+
+The baseline rare-prefix profile reconfirmed **86.95% inclusive sampled time in multiplication/reduction**; the frequent-prefix profile attributed 79.70%. An initial mixed dictionary profile attributed 61.19%, with dictionary probing already material. The baseline compiler retained the nested four-by-four product loops and the four-word reduction loop. Bounds checks were already eliminated and the intrinsic operations lowered to `MULQ`, additions and carry instructions. This was evidence for exposing fixed arithmetic, not evidence of cache misses or a particular CPU execution-port bottleneck.
+
+The retained `multiplyGeneric` explicitly accumulates the seven product columns. Each column uses three 64-bit words, including the high carry; all sixteen products are retained. `squareGeneric` uses four diagonal and six symmetric cross-products. Doubling a cross-product retains its 129th bit before accumulation. Both operations consume all input words before storing the result, preserving left, right and simultaneous input/output aliases. The square is connected both to `squareWith` and directly to paired denominator preparation, which previously bypassed that dispatcher for `c*c`.
+
+Let `B=2^64`. A column has at most four products below `(B-1)^2`, plus a propagated carry below `4B`; its sum is below `4B²`, so 192 bits suffice and the top word is at most three. Symmetric squaring has the same bound when a doubled product is counted twice. The complete product is below `B^8`, which proves the final discarded ninth word is zero. These bounds accept arbitrary full-width, noncanonical 256-bit inputs, including all-one limbs; they do not assume canonical field values.
+
+Reduction computes `L+38H`, using `B^4 == 38 (mod p)`. Its outgoing carry is at most 38. Folding that carry adds at most 1444; if this overflows bit 256, the wrapped low word is below 1444, so the final addition of 38 cannot overflow even the low word. The `multiplyAdd` helper is also full-width safe: `(B-1)^2+2(B-1)=B²-1`. Every `bits.Add64` carry argument is zero or the one-bit result of another `Add64`; larger column carries are ordinary words, never carry arguments. Canonical reduction remains at the existing encoding/sign boundaries. Fixed indexes and input-independent instruction sequences preserve the arithmetic timing contract.
+
+Selective PACE `//go:inline` on `reduceProduct` is retained. The smaller accumulation helpers inline naturally. A five-pair, three-second comparison of reducer call versus inline measured frequent search **82.80 [82.73,83.53]→79.06 [79.01,79.41] ns/key** and ordinary dictionaries **97.29 [97.21,99.57]→93.58 [93.51,93.83]**; rare search was noisier at 73.05 [72.34,74.43]→70.16 [68.63,77.22]. These are within-session helper-boundary comparisons, not replacements for the final baseline table. Forcing the entire multiplication and square to inline did not help and was removed.
+
+| PACE arithmetic code | Symbol size | Stack frame | Static multiply instructions | Stack-referencing instructions |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline loop multiply | 352 B | 96 B | 2 in loops | 12 |
+| Retained multiply | 992 B | 184 B | 20, including four reduction products | 55 |
+| Retained square | 864 B | 136 B | 14, including four reduction products | 47 |
+
+The increased code size and stack traffic are explicit costs of this implementation, justified by complete-search results rather than an assumption that unrolling eliminates spills. Static instruction counts in loops are not executed counts. Retained PACE arithmetic has no helper calls or bounds-check paths; its only call site is the runtime stack-growth path. Stock Go ignores the directive and calls the 256-byte reducer: multiply/square symbols are 864/768 bytes with 256/200-byte frames. Compiler diagnostics found no escaping arithmetic operands. Per-worker scratch and tables remain unchanged, about 114 KiB for paired state. No allocation or new state is introduced into the steady-state loop.
+
+After the change, separate rare/frequent/ordinary-dictionary profiles attributed 71.28%/57.62%/51.58% inclusive time to multiplication, including reduction. Dictionary window matching reached 22.52% in the ordinary case; canonicalization was 3.19% in rare search. Arithmetic remains important, but it is a smaller fraction of the now-faster search. These are sampled shares, not cycle counts or evidence about cache behavior.
+
+#### Complete-search results
+
+Times are median [minimum, maximum] **ns per checked key**; lower is better. Each cell has five samples.
+
+| Workload | PACE baseline | PACE retained | Stock Go baseline | Stock Go retained |
+| --- | ---: | ---: | ---: | ---: |
+| Rare `somethingrare.` | 116.4 [116.3,117.1] | 66.60 [66.53,67.33] | 125.4 [124.3,134.4] | 79.20 [75.56,90.45] |
+| Frequent `ab.` | 126.6 [126.6,127.4] | 76.62 [76.56,77.20] | 134.8 [134.7,135.9] | 85.95 [85.89,86.13] |
+| All 32 one-symbol suffixes: every candidate hits | 8589 [8579,8590] | 8469 [8460,8471] | 8857 [8854,8860] | 8748 [8744,8789] |
+| 512 ordinary literals | 140.9 [140.8,141.7] | 90.69 [90.67,91.13] | 165.6 [165.3,166.5] | 115.9 [115.8,116.0] |
+| 512 shared-triplet literals | 140.5 [140.4,141.4] | 90.35 [90.33,90.36] | 165.1 [164.9,168.5] | 115.4 [115.2,115.6] |
+| Ordinary literals plus mixed anchors | 143.7 [143.6,144.5] | 93.26 [93.17,93.38] | 168.5 [168.3,169.3] | 119.0 [118.9,119.3] |
+| Ordinary literals plus short fallbacks | 696.4 [696.0,697.9] | 591.6 [590.6,592.5] | 751.0 [747.6,760.2] | 643.7 [643.0,645.8] |
+| `a.`, independent walk | 517.1 [516.8,518.9] | 400.3 [399.7,400.7] | 545.1 [543.1,549.3] | 433.3 [432.4,433.5] |
+| `.aa`, checksum-dependent | 131.2 [131.2,131.3] | 80.72 [80.72,80.77] | 139.5 [139.4,140.0] | 89.92 [89.88,90.31] |
+
+PACE rare-prefix time fell 42.8% or **74.8% higher throughput**; ordinary dictionaries gained 55.4% throughput. Stock-Go rare-prefix measurements were noisier, so a separate five-pair, five-second confirmation measured **125.1 [124.4,126.1]→76.67 [75.60,80.29] ns/key**. Stock Go benefits independently; identical compiler gains are neither required nor claimed. All-hit search remains dominated by recovery/reseeding, so its roughly 1.4% PACE throughput change is not representative of selective workloads.
+
+Normal PACE builds forced to portable arithmetic also improved. Five two-second pairs measured frequent search 124.9 [124.8,124.9]→75.96 [75.89,76.59] ordinary dictionaries 138.9 [138.8,138.9]→90.19 [89.86,90.49], shared dictionaries 138.5 [138.4,138.6]→89.54 [89.44,90.43], independent prefix 494.3 [493.6,498.2]→380.6 [380.5,380.7] and checksum suffix 129.0 [129.0,129.3]→80.10 [79.66,80.39] ns/key. Rare search was initially noisy at 115.9 [115.5,123.2]→70.16 [66.57,78.97]; five five-second pairs confirmed 116.2 [115.5,117.1]→67.58 [66.64,70.53]. These accelerated-matcher/checksum controls must not be labeled assembly-free.
+
+Locally supported BMI2, BMI2+ADX and IFMA paths received two-pair, 0.8-second regression screens over rare/frequent/dictionary/shared/short/independent/checksum searches. Non-rare median differences were within about 1.5%, without a material consistent change. Initial rare samples were unusually variable (BMI2 50.365 [47.24,53.49]→59.895 [56.46,63.33], ADX 41.96 [39.36,44.56]→52.21 [47.09,57.33], IFMA 15.36 [14.40,16.32]→18.175 [17.13,19.22]); these observations prompted five-pair, five-second confirmation rather than being treated as regressions or discarded. Confirmation measured BMI2 **47.30 [47.06,47.62]→47.60 [46.96,49.64]**, ADX **39.39 [39.19,39.65]→39.66 [39.16,41.36]** and IFMA **14.43 [14.38,14.56]→14.45 [14.24,15.08] ns/key**. The intervals overlap; this bounds the local regression check, not a claim of exact native-path equivalence on every machine.
+
+#### Bounded alternatives and rejection decisions
+
+The screens below compare against the dedicated-square four-limb version unless stated otherwise. They are complete-search measurements with zero steady-state allocations, not isolated arithmetic wins. Two-sample medians use the midpoint; ranges show both observations.
+
+| Experiment | Rare prefix, reference → experiment, ns/key | Ordinary dictionary, reference → experiment, ns/key | Decision |
+| --- | ---: | ---: | --- |
+| Explicit row → column accumulation | 80.89 [80.89,80.89] → 70.14 [70.10,70.17] | 105.05 [105.0,105.1] → 94.09 [94.02,94.16] | Keep columns; complete final comparison above confirms the combined result |
+| Multiply-based → dedicated square | 70.18 [70.10,70.26] → 66.55 [66.47,66.63] | 94.03 [93.95,94.11] → 90.55 [90.54,90.56] | Keep square, including paired preparation |
+| Fold high columns into reduction earlier | 68.35 [68.22,68.47] → 69.02 [68.77,69.27] | 93.39 [93.32,93.46] → 93.93 [93.64,94.22] | Reject; shorter intermediate lifetimes did not improve search |
+| Force whole multiply/square inline | 66.68 [66.45,66.90] → 67.23 [67.00,67.46] | 90.76 [90.51,91.00] → 91.16 [90.87,91.44] | Reject; keep only reducer annotation |
+| Return square as a value, local `1-c²` boundary | 66.68 [66.44,66.91] → 66.71 [66.63,66.79] | 90.48 [90.46,90.50] → 90.84 [90.77,90.91] | Reject; no useful fusion/copy benefit |
+| Portable dispatch outside output loop | 66.73 [66.50,66.95] → 66.83 [66.54,67.11] | 90.76 [90.59,90.92] → 90.59 [90.40,90.78] | Reject; immaterial change |
+| Canonical-word prefix rejection before serialization | 66.67 [66.43,66.90] → 65.90 [65.86,65.94] | 90.75 [90.45,91.04] → 91.33 [91.30,91.35] | Reject; small selective gain, dictionary regression and extra state/path |
+| Five radix-51 limbs across paired generation | 66.68 [66.47,66.89] → 74.10 [74.01,74.19] | 90.76 [90.51,91.00] → 98.89 [98.78,99.00] | Reject |
+| Radix-51 with precomputed scaled offsets | 66.69 [66.41,66.96] → 70.87 [70.85,70.88] | 90.76 [90.57,90.95] → 95.46 [95.39,95.53] | Reject; closer, still slower |
+
+The explicit row prototype already beat the original loop version, but its early short samples were too variable for a final claim. Columns and squaring were screened independently before their combined confirmation. No fixed-size Karatsuba implementation was retained or claimed: reducing multiplication count alone would not account for its extra additions, corrections, reduction and spills. The existing seven-field scratch, single reciprocal chain and 512-candidate batch were reviewed against their earlier rejected alternatives; the new profiles supplied no evidence justifying another storage, chain-count or batch-size sweep. Limited interleaving beyond independent coefficient accumulation was not pursued without such evidence.
+
+The radix-51 prototype was adapted from the locally installed `filippo.io/edwards25519` v1.2.0 Go field implementation, preserving its attribution and BSD notice in the discarded prototype. The dependency's Fiat-Crypto-generated scalar arithmetic was also inspected for explicit operand bounds, carry structure and fixed-index scheduling; its different modulus and canonical-input contract were not substituted for onino's field contract. No borrowed source remains in the retained implementation. Related arithmetic references are Nath and Sarkar, [*Efficient arithmetic in (pseudo-)mersenne prime order fields*](https://doi.org/10.3934/amc.2020113), Erbsen et al., [*Simple High-Level Code For Cryptographic Arithmetic*](https://adam.chlipala.net/papers/FiatCryptoSP19/) and Pornin, [*On Multiplications with Unsaturated Limbs*](https://www.nccgroup.com/research/on-multiplications-with-unsaturated-limbs/); these are background references, not evidence of a speedup for this implementation.
+
+The alternative retained five-limb centers, all seven scratch fields, prefix products, reciprocal reconstruction and output generation across a complete paired batch. Conversion was paid at initialization/reseed, table transitions, the once-per-batch divsteps bridge, encoding and deferred sign recovery. Existing four-limb layouts remained intact. This credible bounded integration added **102,400 bytes per paired worker**; precomputed `19*offset` limbs added another **6,144 bytes of shared tables**. Initialization and bridges were real work, not free conversions around a replacement multiply. Its search loss did not justify a more invasive removal of duplicate storage or implementation of a separate inversion.
+
+All radix-51 input limbs were below `2^52`. The largest multiplication coefficient was below `77*2^104 < 2^111`; the top coefficient was below `5*2^104`. Two carry stages fit in 64-bit carry words and returned limbs below `2^51+2^18`. Subtraction added `4p` before subtracting to avoid underflow across the full input bound, rather than assuming the narrower upstream bounds. Canonicalization was deferred inside the arithmetic. Conversion from arbitrary four-limb input first canonicalized; output conversion normalized carries before packing, with final canonical encoding at the usual boundary. Boundary/random/repeated-operation tests checked these bounds and conversions against `math/big`; complete paired-key tests covered transitions and reseeding. These tests justified evaluating the prototype, not keeping a slower representation.
+
+The Go prefix prototype used the existing `PrefixPlan` necessary-condition semantics, up to eight mask/value probes on the **canonical** first word. It propagated carries and reduction from the complete field, rejected before byte serialization and serialized survivors for the existing sign filter and exact matcher. Unsupported patterns used the general path. A 512-byte decision array preserved candidate order, accounting and pending-sibling invalidation. Differential checks compared every decision, including rejections, across 65 batches/table transitions and no/all/sparse survivor plans, boundary prefixes and full-width noncanonical values. Existing key, reseed, cancellation, ownership and error-path tests passed. A roughly 1% rare-prefix benefit did not justify the extra path and dictionary loss; all production filtering changes were removed.
+
+Only `//go:inline`, `//go:linkinternal` and `//go:abiinternal` were documented as PACE additions in the installed version's supplied reference. The latter two were out of scope. No semantics were invented for undocumented `//go:nobounds`, `//go:muststack`, `//go:makenozero` or `//go:align` annotations. In any case, arithmetic bounds checks were already absent, steady-state allocation was zero and no measured initialization bottleneck justified changing allocation behavior. The study does not claim to evaluate those directives in a different PACE version.
+
+#### PGO is separate and rejected
+
+A merged profile from separate retained-source rare ordinary-dictionary and frequent-prefix searches trained one PACE purego PGO binary. Five alternating two-second pairs included those workloads and held-out shared/mixed/short dictionaries, all-hit, independent-prefix and checksum-suffix cases. No normal build flag or release behavior was changed.
+
+| Workload | PGO off, median [range], ns/key | PGO, median [range], ns/key |
+| --- | ---: | ---: |
+| Rare | 66.73 [66.57,71.07] | 68.14 [65.29,77.68] |
+| Frequent | 76.64 [76.60,76.74] | 75.49 [75.38,76.22] |
+| Ordinary dictionary | 90.70 [90.66,90.73] | 89.54 [89.47,89.66] |
+| Shared dictionary | 90.36 [90.31,91.50] | 89.31 [89.03,89.37] |
+| Mixed dictionary | 93.34 [93.19,93.36] | 92.79 [92.58,92.92] |
+| Short fallback | 592.4 [591.1,594.3] | 593.7 [593.0,594.2] |
+| All-hit | 8471 [8470,8505] | 8418 [8413,8433] |
+| Independent prefix | 400.7 [400.2,401.7] | 399.3 [399.3,399.9] |
+| Checksum suffix | 80.76 [80.75,80.86] | 79.50 [79.46,79.56] |
+
+Rare measurements were particularly noisy. More importantly, PGO introduced a **224-byte allocation per reseed**: 114,688 B and 512 allocations per all-hit batch and about 3,590 B/16 allocations per independent-prefix batch. A separate allocation profile attributed 99.12% of sampled allocation space to `crypto/internal/fips140/sha512.New` through `sha512.Sum512` during reseeding. Small timing gains did not justify losing the allocation-free contract. PGO was rejected and the source gains above are exclusively `-pgo=off`. This is a different escape from the earlier dependency-field PGO allocation recorded elsewhere in this document.
+
+#### Real CLI confirmation and correctness
+
+CLI runs used the preserved purego executables, `--cpu 1 --simd portable`, real OS entropy and real persisted keys. A Windows runner inherited the fixed affinity, launched a new process group, sent Ctrl+Break after the requested interval and waited for accepted saves to drain. Throughput below divides exact `Total checked` by elapsed time from immediately before process start through process exit; it therefore includes startup and shutdown, unlike the internal CLI rate. No profile was active. Rare searches used five alternating six-second pairs. Dictionary, checksum and frequent-prefix runs used two three-second pairs and are integration screens, not five-pair acceptance evidence. The frequent CLI pattern was `abc.`, rather than benchmark `ab.`, to bound disk output.
+
+| Startup-inclusive CLI workload | PACE baseline → retained, Mkeys/s median [range] | Stock Go baseline → retained, Mkeys/s median [range] |
+| --- | ---: | ---: |
+| Rare `somethingrare.` | 8.562 [8.368,8.566] → 14.909 [13.948,14.948] | 8.157 [7.703,8.159] → 13.586 [12.314,13.622] |
+| 512 ordinary literals | 6.917 [6.895,6.938] → 10.235 [9.920,10.550] | 6.022 [6.000,6.044] → 8.294 [8.032,8.555] |
+| 512 shared-triplet literals | 6.940 [6.918,6.962] → 10.173 [9.906,10.439] | 5.862 [5.836,5.888] → 8.045 [7.770,8.320] |
+| Checksum `.aaaa` | 8.082 [7.977,8.187] → 13.245 [12.841,13.649] | 8.052 [7.990,8.114] → 12.581 [12.126,13.036] |
+| Frequent `abc.` | 5.122 [4.980,5.264] → 5.916 [5.421,6.411] | 5.034 [4.622,5.446] → 6.514 [6.184,6.845] |
+
+Independent-walk `a.` CLI runs were dominated by hundreds of persisted matches per second, not arithmetic. Initial two-pair, one-second screens measured PACE 0.015→0.014 and stock Go 0.015→0.012 Mkeys/s. Five alternating three-second confirmation pairs instead measured PACE **0.015 [0.015,0.016]→0.015 [0.014,0.016]** and stock Go **0.016 [0.015,0.017]→0.016 [0.016,0.017] Mkeys/s**. There is no demonstrated disk-bound independent-walk CLI speedup; the allocation-free complete-search benchmark isolates its CPU improvement. Random hit counts, filesystem state and drain time limit short persisted comparisons.
+
+The retained tests use independent `math/big` references for arbitrary 256-bit representatives, zero, modulus boundaries, maximal limbs and all supported aliases. An added carry-chain test walks single-bit and below-single-bit values through repeated in-place squares and left/right-aliased multiplication. Existing complete-key tests compare against independent scalar multiplication and exercise table transitions, reseeding, sign recovery, matching, owned saved keys, checked accounting, cancellation and errors. Full suites passed with PACE and stock Go, each in purego and normal builds. The repository's custom `vet` passed for Windows amd64 normal/purego and all Windows/Linux/Darwin amd64/arm64 targets; PACE Linux arm64 purego and stock-Go Darwin arm64 cross-builds passed. Cross-compilation establishes compatibility, not non-amd64 performance. CLI selection/reporting, explicit forcing, automatic selection and GPU behavior were not changed.
+
+#### Reproduction commands
+
+The following PowerShell commands are self-contained for the measured compiler/benchmark settings; `bin` and `measurements` are ignored output directories. Build the baseline at the recorded commit **before** applying the retained source changes, then repeat with `$label = 'final'`. Preserve both sets of binaries. Do not compare a newly changed architecture target or PGO setting as a source gain.
+
+```powershell
+[System.Diagnostics.Process]::GetCurrentProcess().ProcessorAffinity = [IntPtr]4
+$env:GOMAXPROCS = '1'
+$env:GOAMD64 = 'v1'
+$env:CGO_ENABLED = '0'
+$env:ONINO_BENCH_BACKEND = 'portable'
+New-Item -ItemType Directory -Force bin, measurements | Out-Null
+git rev-parse HEAD
+go version
+pace version
+$label = 'baseline' # use 'final' after applying the source changes
+foreach ($compiler in @('pace', 'go')) {
+	foreach ($flavor in @('purego', 'normal')) {
+		$flags = @('-p=1', '-pgo=off')
+		if ($flavor -eq 'purego') { $flags += '-tags=purego' }
+		& $compiler build @flags -o "bin/purego-$label-$compiler-$flavor-cli.exe" .
+		if ($LASTEXITCODE) { throw 'CLI build failed' }
+		& $compiler test @flags -vet=off -c -o "bin/purego-$label-$compiler-$flavor-test.exe" ./internal/search
+		if ($LASTEXITCODE) { throw 'benchmark build failed' }
+	}
+}
+$compiler = 'pace' # repeat with 'go'; measure sequentially
+$flavor = 'purego'
+$bench = '^BenchmarkFullSearch/(rare|frequent|all_hits|512|shared512|mixed512|short512)$|^BenchmarkSuffixCosts/(prefix1|suffix2)/reseed_shake$'
+for ($pair = 1; $pair -le 5; $pair++) {
+	$order = @('baseline', 'final')
+	if ($pair % 2 -eq 0) { [array]::Reverse($order) }
+	foreach ($variant in $order) {
+		& "./bin/purego-$variant-$compiler-$flavor-test.exe" '-test.run=^$' "-test.bench=$bench" '-test.benchtime=2s' '-test.cpu=1' '-test.benchmem'
+		if ($LASTEXITCODE) { throw 'benchmark failed' }
+	}
+}
+```
+
+For integration controls use `$flavor = 'normal'` and run the same loop with `ONINO_BENCH_BACKEND` set in turn to `portable`, `bmi2`, `bmi2-adx` and `ifma` where supported. Rare confirmations use `-test.bench=^BenchmarkFullSearch/^rare$`, `-test.benchtime=5s` and five pairs. The exact CLI invocations are `./bin/purego-final-pace-purego-cli.exe --cpu 1 --simd portable --output matches/purego-local somethingrare.` and the corresponding baseline/stock executables; substitute `abc.`, `.aaaa` or `a.` for the other scalar patterns. Stop with Ctrl+C/Ctrl+Break and wait for drain. To reproduce the startup-inclusive rate, measure process start through exit externally and use exact checked counts, not the CLI's rounded internal rate. Dictionary arguments are the first ten lowercase base32 characters of SHA-256 of each little-endian uint64 index 0-511; shared arguments are `aaa` plus the first seven characters. Random entropy and disk contents are intentionally not fixed, so persisted hit counts will differ.
+
+Run profiling, diagnostics and validation separately from the timing loop:
+
+```powershell
+$env:ONINO_BENCH_BACKEND = 'portable'
+foreach ($workload in @('rare', '512', 'frequent')) {
+	& ./bin/purego-final-pace-purego-test.exe '-test.run=^$' "-test.bench=^BenchmarkFullSearch/^$workload`$" '-test.benchtime=4s' '-test.cpu=1' "-test.cpuprofile=measurements/purego-$workload.cpu"
+}
+pace tool pprof -top measurements/purego-rare.cpu
+pace tool pprof -proto -output measurements/purego-mixed.pprof measurements/purego-rare.cpu measurements/purego-512.cpu measurements/purego-frequent.cpu
+pace test -vet=off -p=1 -tags=purego '-pgo=measurements/purego-mixed.pprof' -c -o bin/purego-pgo-test.exe ./internal/search
+# Compare this PGO binary with the final non-PGO binary using the same paired loop.
+pace list -tags=purego -f '{{.ImportPath}} Go={{.GoFiles}} S={{.SFiles}}' ./...
+pace tool nm bin/purego-final-pace-purego-cli.exe | Select-String 'onino.*(BMI2|IFMA|cpuid|xgetbv|keccak.*Asm|match.*AVX)'
+pace tool objdump -s 'search\.(multiplyGeneric|squareGeneric)' bin/purego-final-pace-purego-test.exe
+pace test -vet=off -p=1 -tags=purego -pgo=off -c -o bin/purego-diagnostics.exe '-gcflags=github.com/coalaura/onino/internal/search=-m=2 -d=ssa/check_bce/debug=1' ./internal/search
+foreach ($compiler in @('pace', 'go')) {
+	& $compiler test -vet=off -p=1 -pgo=off -tags=purego ./...
+	& $compiler test -vet=off -p=1 -pgo=off ./...
+}
+vet --tests
+vet --tests --tags purego
+vet --tests --os windows --arch arm64
+vet --tests --os linux --arch amd64
+vet --tests --os linux --arch arm64
+vet --tests --os darwin --arch amd64
+vet --tests --os darwin --arch arm64
+builder build go linux --arch arm64 --pace --compat --no-gen --output bin/purego-linux-arm64 -p=1 -pgo=off -tags=purego
+builder build go darwin --arch arm64 --compat --no-gen --output bin/purego-darwin-arm64 -p=1 -pgo=off
+```
+
+The result is a focused source improvement, not a portable-performance ceiling. It establishes a substantial local PACE purego gain with independent stock-Go improvement, while rejecting the five-limb integration, extra filtering path and PGO configuration tested here. It supplies no performance evidence for Haswell, ARM, other PACE versions, multicore scaling or GPU execution. All rejected production variants were removed; temporary variants, raw measurements and profiles remain outside tracked source and normal builds require none of them.
+
 ### Other retained and rejected approaches
 
 The arithmetic studies sit within a broader set of implementation screens. The table retains their distinct outcomes, including experiments for which only a bounded result rather than a full sample distribution was recorded.
@@ -313,7 +506,7 @@ The arithmetic studies sit within a broader set of implementation screens. The t
 | Targeted PACE inlining | Retained for hot dictionary window/verification paths; whole-matcher inlining and mandatory PGO were unnecessary. |
 | PGO-only optimization | A profile-dependent `field.Element.Bytes` inlining decision caused a 32-byte batch allocation. Diagnosis isolated that escape; ordinary builds remain allocation-free without PGO. |
 | Earlier affine-Y recurrence | Rare misses improved, but per-hit recovery/reseeding lost. The Hosseini-Farashahi specialization was the lower-cost follow-up and still lost to pairing. |
-| Dedicated Go four-limb square | Fewer products did not compensate for carry propagation; the measured implementation was slower than multiplication. The later assembly square wins in denominator preparation. |
+| Earlier dedicated Go four-limb square | Fewer products did not compensate for that implementation's carry propagation. The later assembly square wins in denominator preparation; the subsequent [pure-Go column-square study](#pace-pure-go-arithmetic) also retains a different Go implementation with complete-search evidence. |
 | Shared medium-set AVX2 register filter | Extraction and survivor-verification costs outweighed complete-search benefits. |
 | Four independent prefix chains | Extra inversion/normalization work lost in complete searches. |
 | Four-lane radix-29 AVX2 | Independent arithmetic tests passed, but packed multiplication was roughly four times slower than four BMI2 products; no point backend was added. |

@@ -67,6 +67,48 @@ func FuzzFieldArithmetic(f *testing.F) {
 	})
 }
 
+func TestGenericFieldCarryChains(t *testing.T) {
+	prime := new(big.Int).Lsh(big.NewInt(1), 255)
+	prime.Sub(prime, big.NewInt(19))
+
+	values := make([]fieldElement, 0, 515)
+	values = append(values, fieldElement{}, fieldElement{1}, fieldElement{^uint64(0), ^uint64(0), ^uint64(0), ^uint64(0)})
+
+	for limb := range 4 {
+		for bit := range 64 {
+			var value fieldElement
+
+			value[limb] = uint64(1) << bit
+			values = append(values, value)
+			value[limb]--
+			values = append(values, value)
+		}
+	}
+
+	for _, value := range values {
+		actual := value
+		expected := fieldInteger(value)
+
+		for round := range 32 {
+			squareGeneric(&actual, &actual)
+			expected.Mul(expected, expected)
+			expected.Mod(expected, prime)
+			checkFieldResult(t, "repeated generic square", &actual, expected)
+
+			factor := values[(round*17+3)%len(values)]
+			factorInteger := fieldInteger(factor)
+			expected.Mul(expected, factorInteger)
+			expected.Mod(expected, prime)
+
+			rightAlias := factor
+			multiplyGeneric(&rightAlias, &actual, &rightAlias)
+			multiplyGeneric(&actual, &actual, &factor)
+			checkFieldResult(t, "repeated generic left alias", &actual, expected)
+			checkFieldResult(t, "repeated generic right alias", &rightAlias, expected)
+		}
+	}
+}
+
 func checkFieldArithmetic(t *testing.T, left, right fieldElement) {
 	t.Helper()
 
