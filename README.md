@@ -169,6 +169,26 @@ Tested versions (fresh samples: 2026-10-08; retained CPU-only competitors: 2026-
 - [mkp224o v1.7.0](https://github.com/cathugger/mkp224o/releases/tag/v1.7.0) - official Windows release.
 - NVIDIA driver 616.64 for both CPU+GPU configurations.
 
+### Windows CPU-only and GPU-only: Prefix32
+
+Onino and [Prefix32 v2.2.0](https://github.com/0xROOTPLS/Prefix32/releases/tag/v2.2.0), compared separately in CPU-only and GPU-only modes on the same **AMD Ryzen 9 9950X3D**, **Windows 11**, **RTX 5090** and **NVIDIA driver 616.64**. Both search the 13-character prefix `somethingrare` (`somethingrare.` in onino's anchored syntax). This rare prefix avoids frequent-match overhead and Prefix32's CPU stop-after-first-match behavior. Normal key-file output remained enabled; every sample produced **zero matches and zero key files**.
+
+**Throughput in million candidates/second. CPU-only and GPU-only show the median (min-max) of five samples; CPU+GPU shows one sample.**
+
+| Mode | Onino v0.3.0 | Prefix32 v2.2.0 `-fast` |
+| --- | ---: | ---: |
+| CPU-only, 32 threads | **1,320.1** (1,316.7-1,324.5) | 472.8 (469.4-475.9) |
+| GPU-only, RTX 5090 | 2,810.0 (2,795.0-2,815.0) | **10,392.3** (10,361.9-10,412.3) |
+| CPU+GPU, 32 threads + RTX 5090 | 4,115.0 (single sample) | - |
+
+On this workload, onino's median CPU-only throughput is **2.79x** Prefix32's and Prefix32's median GPU-only throughput is **3.70x** onino's. The five onino CPU samples are reused unchanged from the 2026-10-08 comparison above. Prefix32 CPU-only, Prefix32 GPU-only and onino GPU-only were measured on **2026-10-11**, sequentially with the three configurations' order rotated each round. A separate onino CPU+GPU run on the same date provides full-machine throughput for context; Prefix32 has no corresponding native combined mode. [Raw samples](.github/prefix32-comparison.csv) include all five configurations; `onino-avx512` identifies the retained CPU series.
+
+The same counter-delta procedure was used: the first progress report at least 15 seconds after process launch starts an approximately 20-second, progress-bounded measurement window. GPU setup and tuning finished before the starting counter snapshot. Prefix32's first GPU run spent approximately 96 seconds autotuning before measurement; subsequent runs reused its cached settings. Rates are cumulative candidate-count deltas divided by externally measured wall time. Both tools print rounded compact counters, so derived rates include that quantization. Prefix32's built-in `--bench` was not used because it substitutes its own prefix.
+
+- **Onino:** the same PACE-built v0.3.0 GPU-enabled binary described above. CPU-only used `--cpu all --gpu off` with automatic AVX-512; GPU-only used `--cpu 0 --gpu auto`, automatically selecting 16,384 streams and one round in every sample. The single CPU+GPU run used `--cpu all --gpu auto`, with 32 CPU workers and automatic GPU tuning selecting 16,384 streams and 12 rounds.
+- **Prefix32:** the official `prefix32-windows-x86_64-fast.exe` release binary, with its newer x86 instruction support. CPU-only used `--threads 32 --count 0 --no-print`; GPU-only added `--gpu --gpu-effort 10` for maximum effort. GPU autotuning selected `BATCH=1024 GS=43520 NB=64` in every sample. `--no-print` affects console key display, not key-file output.
+- All 32 logical CPUs were available to every process. GPU-only modes still use host CPU resources to prepare and coordinate GPU work, but do not run CPU search workers. Prefix32's working directory was each trial's `keys` directory, since it has no output-directory option.
+
 ### Linux single-worker rare-prefix runs
 
 One-minute CPU-only searches on three additional machines, each using **one search worker pinned to logical CPU 0** with `taskset -c 0`. The ten-character prefix was `rareprefix` (`rareprefix.` in onino's anchored syntax). Each configuration was run once (with 20s warmup), with no matches found.
