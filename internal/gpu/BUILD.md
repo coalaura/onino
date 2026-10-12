@@ -1,6 +1,6 @@
 # Building the optional Vulkan backend
 
-Normal builds require neither CGO nor Vulkan. For the GPU backend, use Go 1.27.1 or compatible PACE, CGO enabled, a C11 compiler and `-tags gpu`. The committed bridge includes volk and the required Vulkan headers and Go embeds the committed SPIR-V; building an executable does not require the Vulkan SDK or a shader compiler. The resulting executable loads the system Vulkan loader and driver at runtime. Vulkan 1.3, shader 64-bit integers, compute timestamps, host-visible staging memory, device-local storage memory and the checked workgroup/storage limits are required. Host-coherent staging is preferred; non-coherent allocations are explicitly flushed and invalidated.
+Normal builds require neither CGO nor Vulkan. For the GPU backend, use Go 1.27.1 or compatible PACE, CGO enabled, a C11 compiler and `-tags gpu`. The committed bridge includes volk and the required Vulkan headers and Go embeds the committed SPIR-V; building an executable does not require the Vulkan SDK or a shader compiler. The resulting executable loads the system Vulkan loader and driver at runtime. Vulkan 1.3 with `maintenance4`, shader 64-bit integers, compute timestamps, 128-invocation workgroups, host-visible staging memory, device-local storage memory and the checked shared/storage limits are required. Host-coherent staging is preferred; non-coherent allocations are explicitly flushed and invalidated.
 
 On Windows, build with `builder build go --cgo --pace --dyn --no-gen -tags gpu`. Omit `--pace` for stock Go.
 
@@ -10,7 +10,7 @@ Linux requires dynamic linking against a libc compatible with the installed Vulk
 CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1 CC="zig cc -target x86_64-linux-gnu.2.31" pace build -trimpath -buildvcs=false -ldflags=-linkmode=external -tags gpu -o onino-linux .
 ```
 
-Replace `pace` with `go` for stock Go. The explicit GNU target is required with builder versions that select a musl target even when `--dyn` is supplied. Verify that the Linux artifact has an ELF interpreter such as `/lib64/ld-linux-x86-64.so.2` and a dynamic libc dependency; a successful link alone does not establish that the driver can be loaded. The installed driver may impose a newer libc requirement than the application's selected baseline.
+Replace `pace` with `go` for stock Go. Builder 0.5.5 also passed `builder build go linux --arch amd64 --cgo --pace --gnu --dyn --compat --no-gen -tags gpu`; explicitly selecting `--gnu` avoids the musl-target issue in older invocations using `--dyn` alone. Verify that the Linux artifact has an ELF interpreter such as `/lib64/ld-linux-x86-64.so.2` and a dynamic libc dependency; a successful link alone does not establish that the driver can be loaded. The installed driver may impose a newer libc requirement than the application's selected baseline.
 
 GPU builds add `--gpu off|auto|<index>`, defaulting to `off`. With GPU search enabled, `--cpu 0` and `--cpu off` both disable CPU search workers; the host still performs GPU orchestration, match verification and storage. For example, `onino --gpu auto --cpu off somethingrare.` searches only on the GPU; `onino --gpu auto --cpu 1 somethingrare.` also runs one pinned CPU worker when topology information is available. `auto` prefers a capable discrete device; an explicit index follows Vulkan physical-device enumeration. Initialization errors are reported rather than silently falling back to CPU search.
 
@@ -29,12 +29,18 @@ glslc --target-env=vulkan1.3 -O internal/gpu/shaders/arithmetic.comp -o internal
 spirv-val --target-env vulkan1.3 internal/gpu/shaders/arithmetic.spv
 glslc --target-env=vulkan1.3 -O -DONINO_DIAGNOSTIC=1 internal/gpu/shaders/search.comp -o internal/gpu/shaders/diagnostic.spv
 spirv-val --target-env vulkan1.3 internal/gpu/shaders/diagnostic.spv
-glslc --target-env=vulkan1.3 -O -DONINO_INITIAL_STEPS=4294967170u internal/gpu/shaders/search.comp -o internal/gpu/shaders/epoch.spv
+glslc --target-env=vulkan1.3 -O -DONINO_INITIAL_STEPS=4294967167u internal/gpu/shaders/search.comp -o internal/gpu/shaders/epoch.spv
 spirv-val --target-env vulkan1.3 internal/gpu/shaders/epoch.spv
 ```
 
 The arithmetic, full-encoding and epoch-boundary diagnostic shaders are embedded only in correctness tests. The epoch variant changes the initial step counter to exercise exhaustion without traversing billions of candidates. Source edits require regenerating and validating the affected SPIR-V before testing. There is deliberately no automatic SDK download or shader compilation during normal builds.
 
+Search specialization constant 0 selects preparation (0), inversion (1) or reconstruction (2); constant 1 selects local size 128, 64 or 128 respectively. All three pipelines use the same embedded module. The 128 pairs per stream are distinct from the runtime stream count and rounds per submission. Regenerate all four modules after changing shared field arithmetic; the 2026-10-12 generation was independently reproduced byte-for-byte and validated.
+
 ## Device correctness checks
 
-Set `ONINO_VULKAN_TEST=1` and make `VK_LAYER_KHRONOS_validation` available to the Vulkan loader (using `VK_LAYER_PATH` if needed), then run `builder test go --cgo --pace --dyn --no-gen -tags gpu -vet=off ./...`. Device tests require validation and fail on validation errors. Set `VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT` to include synchronization validation. Tests select physical device zero by default; `ONINO_VULKAN_DEVICE` overrides the index. Without the environment opt-in, device tests skip, allowing compilation and host-only tests on systems without Vulkan. Repeat without `--pace` for stock Go. Use the custom `vet` tool for static checks. Timing runs must leave validation disabled.
+Set `ONINO_VULKAN_TEST=1` and make `VK_LAYER_KHRONOS_validation` available to the Vulkan loader (using `VK_LAYER_PATH` if needed), then run `builder test go --cgo --pace --dyn --no-gen -tags gpu -vet=off -p=1 ./...`. Device tests require validation and fail on validation errors. Set `VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT` to include synchronization validation. Tests select physical device zero by default; `ONINO_VULKAN_DEVICE` overrides the index. Without the environment opt-in, device tests skip, allowing compilation and host-only tests on systems without Vulkan. Repeat without `--pace` for stock Go. Use `vet --tests --tags gpu --cgo` for custom static checks. Timing runs must leave validation disabled.
+
+## Optional phase profiling
+
+Set `ONINO_GPU_PROFILE=1` to add preparation/inversion/reconstruction timestamps and print their accumulated nanoseconds on shutdown. Normal operation has only whole-sequence timestamps; phase profiling adds up to 193 queries per submission and must be disabled for throughput comparisons. Use `--gpu-diagnostics` for exact completed counters, host gaps, submission tails, initialization/pipeline creation and teardown timing. The measured phase boundaries include synchronization. Pipeline executable statistics require separate development tooling and are not enabled by production search. See [RESEARCH-GPU.md](../../RESEARCH-GPU.md#10-radix-232-and-cooperative-batches-2026-10-12) for measured results and unavailable hardware counters.

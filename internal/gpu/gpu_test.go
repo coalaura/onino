@@ -50,7 +50,9 @@ func TestCandidateRanges(t *testing.T) {
 
 	commands := []command{initial}
 
-	for candidate := range 260 {
+	pairs := pairCount
+
+	for candidate := range 4*pairs + 4 {
 		err = engine.submit(0, commands, 2, false)
 		if err != nil {
 			t.Fatal(err)
@@ -66,8 +68,8 @@ func TestCandidateRanges(t *testing.T) {
 		}
 
 		result := completed.hits[0]
-		center := uint32(64 + 129*(candidate/128))
-		position := uint32((candidate%128)/2 + 1)
+		center := uint32(pairs + (2*pairs+1)*(candidate/(2*pairs)))
+		position := uint32((candidate%(2*pairs))/2 + 1)
 		steps := center + position
 
 		if candidate%2 != 0 {
@@ -134,8 +136,8 @@ func TestArithmetic(t *testing.T) {
 			first = [32]byte{}
 		}
 
-		putLimbs(commands[index].Center[:10], first[:])
-		putLimbs(commands[index].Center[10:20], second[:])
+		putLimbs(commands[index].Center[:8], first[:])
+		putLimbs(commands[index].Center[8:16], second[:])
 
 		commands[index].Action = uint32(index % 5)
 
@@ -269,7 +271,7 @@ func TestOverflowPauseAndGeneration(t *testing.T) {
 	commands[0] = command{Expected: 2, Action: 1}
 
 	completed = dispatch(t, engine, commands, false)
-	if len(completed.hits) != 1 || completed.hits[0].Steps != 63 {
+	if len(completed.hits) != 1 || completed.hits[0].Steps != pairCount-1 {
 		t.Fatal("resume lost the paired sibling")
 	}
 
@@ -428,9 +430,11 @@ func TestPrefixFiltering(t *testing.T) {
 	commands := []command{initial}
 	checked := uint32(0)
 
-	for candidate := range 384 {
-		center := uint32(64 + 129*(candidate/128))
-		position := uint32(candidate%128/2 + 1)
+	pairs := pairCount
+
+	for candidate := range 6 * pairs {
+		center := uint32(pairs + (2*pairs+1)*(candidate/(2*pairs)))
+		position := uint32(candidate%(2*pairs)/2 + 1)
 
 		steps := center + position
 
@@ -507,7 +511,7 @@ func TestEpochBoundary(t *testing.T) {
 	commands := []command{initial}
 	completed := dispatch(t, engine, commands, false)
 
-	if completed.checked != 128 || len(completed.hits) != 1 || completed.hits[0].Kind != 1 || completed.hits[0].Generation != 1 {
+	if completed.checked != 2*pairCount || len(completed.hits) != 1 || completed.hits[0].Kind != 1 || completed.hits[0].Generation != 1 {
 		t.Fatalf("range exhaustion: %+v", completed)
 	}
 
@@ -526,7 +530,7 @@ func TestEpochBoundary(t *testing.T) {
 
 	completed = dispatch(t, engine, commands, false)
 
-	if completed.checked != 128 || len(completed.hits) != 1 || completed.hits[0].Generation != 2 {
+	if completed.checked != 2*pairCount || len(completed.hits) != 1 || completed.hits[0].Generation != 2 {
 		t.Fatal("exhausted stream did not accept replacement")
 	}
 

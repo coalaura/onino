@@ -13,6 +13,41 @@ import (
 	"github.com/coalaura/onino/internal/pattern"
 )
 
+func TestVerificationBackpressureCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	candidates := make(chan discovered, 9)
+
+	for range cap(candidates) {
+		candidates <- discovered{}
+	}
+
+	controller := execution{ctx: ctx, candidates: candidates, refills: make(chan feedback)}
+	done := make(chan error, 1)
+
+	go func() {
+		done <- controller.submit(configuration{streams: 1, rounds: 1}, false)
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("submitted with a verification backlog: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("backpressure cancellation: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("backpressure ignored cancellation")
+	}
+}
+
 func TestSubmissionTransitions(t *testing.T) {
 	requireVulkan(t)
 
@@ -60,7 +95,7 @@ func TestSubmissionTransitions(t *testing.T) {
 			t.Fatal(collectError)
 		}
 
-		expected := uint32(setting.streams * setting.rounds * 128)
+		expected := uint32(setting.streams * setting.rounds * 2 * pairCount)
 		if completed.checked != expected || completed.pending != 0 || len(completed.hits) != 0 {
 			t.Fatalf("transition %d: checked=%d want=%d pending=%d hits=%d", index, completed.checked, expected, completed.pending, len(completed.hits))
 		}
@@ -166,7 +201,7 @@ func BenchmarkSubmission(b *testing.B) {
 		}
 
 		completed, collectError := engine.collect(0)
-		if collectError != nil || completed.checked != 16384*16*128 {
+		if collectError != nil || completed.checked != 16384*16*2*pairCount {
 			b.Fatalf("submission accounting: %+v %v", completed, collectError)
 		}
 	}

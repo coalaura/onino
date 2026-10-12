@@ -135,7 +135,7 @@ func (tuner *calibration) selectInitial() (observation, error) {
 			fallback = candidate
 		}
 
-		if candidate.backlog > next.streams/4 || tuner.acceptance*float64(next.streams*128) > 256 {
+		if candidate.backlog > next.streams/4 || tuner.acceptance*float64(next.streams*2*pairCount) > 256 {
 			break
 		}
 	}
@@ -226,7 +226,7 @@ func tuningCandidates(anchor observation, options Options, acceptance float64) [
 		for _, target := range targets {
 			rounds = max(1, min(MaxRounds, int(float64(target)*float64(anchor.configuration.rounds)/float64(max(anchor.tail, time.Microsecond)))))
 
-			if acceptance*128 > 0.05 {
+			if acceptance*(2*pairCount) > 0.05 {
 				rounds = 1
 			}
 
@@ -243,7 +243,7 @@ func tuningCandidates(anchor observation, options Options, acceptance float64) [
 			nearby := max(1, streams/divisor)
 			nearbyRounds := rounds
 
-			if options.AutoRounds && acceptance*128 <= 0.05 {
+			if options.AutoRounds && acceptance*(2*pairCount) <= 0.05 {
 				nearbyRounds = min(MaxRounds, rounds*divisor)
 			}
 
@@ -251,7 +251,7 @@ func tuningCandidates(anchor observation, options Options, acceptance float64) [
 		}
 	}
 
-	if options.AutoStreams && options.AutoRounds && streams >= 4096 && acceptance*128 <= 0.05 {
+	if options.AutoStreams && options.AutoRounds && streams >= 4096 && acceptance*(2*pairCount) <= 0.05 {
 		candidates = appendConfiguration(candidates, configuration{streams: 4096, rounds: 2})
 
 		if streams >= 8192 {

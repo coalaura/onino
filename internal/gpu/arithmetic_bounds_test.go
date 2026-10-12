@@ -22,55 +22,47 @@ func TestArithmeticBounds(t *testing.T) {
 		operation := uint32(index % 8)
 		commands[index].Action = operation
 
-		for limb := range 10 {
-			radix := uint32(1) << (26 - uint(limb&1))
-			limit := radix
+		for limb := range 8 {
+			maximum := ^uint32(0)
 
-			if operation >= 2 && operation <= 6 {
-				limit *= 3
-			}
-
-			first := random.Uint32N(limit)
-			second := random.Uint32N(limit)
+			first := random.Uint32()
+			second := random.Uint32()
 
 			switch index / 8 {
 			case 0:
-				first = limit - 1
-				second = limit - 1
+				first = maximum
+				second = maximum
 			case 1:
 				first = 0
-				second = limit - 1
+				second = maximum
 			case 2:
-				first = limit - 1
+				first = maximum
 				second = 0
 			case 3:
-				first = radix - 1
+				first = maximum
 				second = 1
 			case 4:
-				first = radix - 1
-				second = radix - 1
+				first = maximum
+				second = maximum
 			default:
 				// One limb at each carry boundary, with all other limbs maximal.
 				boundary := index/8 - 5
-				if boundary < 30 {
-					first = limit - 1
-					second = limit - 1
+				if boundary < 24 {
+					first = maximum
+					second = maximum
 
 					if limb == boundary/3 {
-						first = radix - 1 + uint32(boundary%3)
-						if first >= limit {
-							first = 0
-						}
+						first = maximum + uint32(boundary%3)
 					}
 				}
 			}
 
 			commands[index].Center[limb] = first
-			commands[index].Center[10+limb] = second
+			commands[index].Center[8+limb] = second
 		}
 
-		left := integerLimbs(commands[index].Center[:10])
-		right := integerLimbs(commands[index].Center[10:20])
+		left := integerLimbs(commands[index].Center[:8])
+		right := integerLimbs(commands[index].Center[8:16])
 
 		result := new(big.Int)
 
@@ -124,7 +116,7 @@ func TestArithmeticBounds(t *testing.T) {
 
 		second := completed.hits[2*index+1]
 		if second.Low != 0 {
-			t.Fatalf("operation %d case %d: output violated pre-canonical limb bounds", commands[index].Action, index)
+			t.Fatalf("operation %d case %d: output violated canonical bounds", commands[index].Action, index)
 		}
 
 		limbs := []uint32{first.Stream, first.Generation, first.Steps, first.Kind, first.Low, first.High, second.Stream, second.Generation, second.Steps, second.Kind}
@@ -150,12 +142,12 @@ func integerLimbs(limbs []uint32) *big.Int {
 	result := new(big.Int)
 	shift := uint(0)
 
-	for index, limb := range limbs {
+	for _, limb := range limbs {
 		term := new(big.Int).Lsh(new(big.Int).SetUint64(uint64(limb)), shift)
 
 		result.Add(result, term)
 
-		shift += 26 - uint(index&1)
+		shift += 32
 	}
 
 	return result

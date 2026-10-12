@@ -77,6 +77,17 @@ func (controller *execution) submit(configuration configuration, collectOnly boo
 		if err != nil {
 			return err
 		}
+
+		// Bound queued verification before accepting more work. Collection-only
+		// drainage must never wait for acknowledgements or resume paused streams.
+		for len(controller.candidates) > 8 {
+			select {
+			case refill := <-controller.refills:
+				controller.firstUpdate, controller.lastUpdate = applyUpdate(refill, controller.commands, controller.firstUpdate, controller.lastUpdate)
+			case <-controller.ctx.Done():
+				return controller.ctx.Err()
+			}
+		}
 	}
 
 	var (

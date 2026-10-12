@@ -15,11 +15,11 @@
 #endif
 #include "vendor/volk.c"
 
-_Static_assert(sizeof(onino_command) == 132, "shader command layout");
+_Static_assert(sizeof(onino_command) == 108, "shader command layout");
 _Static_assert(sizeof(onino_hit) == 24, "shader hit layout");
 _Static_assert(sizeof(onino_result) == 16, "shader result header layout");
 
-enum { ONINO_STREAM_BYTES = 5276, ONINO_STREAM_BUDGET = 8192 };
+enum { ONINO_PAIRS = 128, ONINO_STREAM_BYTES = 8324, ONINO_STREAM_BUDGET = 12288 };
 enum { ONINO_PREPARE_FIRST, ONINO_PREPARE, ONINO_INVERT, ONINO_RECONSTRUCT, ONINO_RECONSTRUCT_LAST };
 
 typedef struct {
@@ -49,7 +49,9 @@ struct onino_gpu {
 	VkDevice device;
 	VkQueue queue;
 	VkPhysicalDeviceMemoryProperties memory;
-	VkPipeline pipeline;
+	VkPipeline pipelines[3];
+	uint32_t query_stride;
+	uint64_t phase_ticks[3], profiled_rounds;
 	VkPipelineLayout layout;
 	VkDescriptorSetLayout descriptors;
 	VkDescriptorPool descriptor_pool;
@@ -170,10 +172,11 @@ onino_gpu *onino_open(int index, int validation, uint32_t streams, uint32_t capa
 	for (uint32_t device_index = 0; device_index < device_count; device_index++) {
 		if (index >= 0 && device_index != (uint32_t)index) { continue; }
 		VkPhysicalDeviceProperties properties;
-		VkPhysicalDeviceFeatures features;
+		VkPhysicalDeviceVulkan13Features supported13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+		VkPhysicalDeviceFeatures2 features = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &supported13 };
 		vkGetPhysicalDeviceProperties(devices[device_index], &properties);
-		vkGetPhysicalDeviceFeatures(devices[device_index], &features);
-		if (properties.apiVersion < VK_API_VERSION_1_3 || !features.shaderInt64 || properties.limits.maxComputeWorkGroupInvocations < 64 || properties.limits.maxComputeWorkGroupSize[0] < 64 || properties.limits.maxComputeSharedMemorySize < 8000 || properties.limits.maxComputeWorkGroupCount[0] < streams || properties.limits.maxStorageBufferRange < streams * ONINO_STREAM_BYTES || properties.limits.maxStorageBufferRange < table_size) { continue; }
+		vkGetPhysicalDeviceFeatures2(devices[device_index], &features);
+		if (properties.apiVersion < VK_API_VERSION_1_3 || !features.features.shaderInt64 || !supported13.maintenance4 || properties.limits.maxComputeWorkGroupInvocations < ONINO_PAIRS || properties.limits.maxComputeWorkGroupSize[0] < ONINO_PAIRS || properties.limits.maxComputeSharedMemorySize < ONINO_PAIRS * 64 + 2048 || properties.limits.maxComputeWorkGroupCount[0] < streams || properties.limits.maxStorageBufferRange < streams * ONINO_STREAM_BYTES || properties.limits.maxStorageBufferRange < table_size) { continue; }
 		uint32_t queue_count = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(devices[device_index], &queue_count, NULL);
 		VkQueueFamilyProperties *queues = calloc(queue_count, sizeof(*queues));
@@ -195,11 +198,12 @@ onino_gpu *onino_open(int index, int validation, uint32_t streams, uint32_t capa
 		free(queues);
 	}
 	free(devices);
-	if (!gpu->physical) { fail(error, error_size, "selected device requires Vulkan 1.3, shaderInt64, compute timestamps and sufficient storage/workgroup limits", VK_ERROR_FEATURE_NOT_PRESENT); goto failure; }
+	if (!gpu->physical) { fail(error, error_size, "selected device requires Vulkan 1.3, maintenance4, shaderInt64, compute timestamps and sufficient storage/workgroup limits", VK_ERROR_FEATURE_NOT_PRESENT); goto failure; }
 	float priority = 1;
 	VkDeviceQueueCreateInfo queue_info = { .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = family, .queueCount = 1, .pQueuePriorities = &priority };
 	VkPhysicalDeviceFeatures features = { .shaderInt64 = VK_TRUE };
-	VkDeviceCreateInfo device = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .queueCreateInfoCount = 1, .pQueueCreateInfos = &queue_info, .pEnabledFeatures = &features };
+	VkPhysicalDeviceVulkan13Features features13 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES, .maintenance4 = VK_TRUE };
+	VkDeviceCreateInfo device = { .sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &features13, .queueCreateInfoCount = 1, .pQueueCreateInfos = &queue_info, .pEnabledFeatures = &features };
 	CHECK(vkCreateDevice(gpu->physical, &device, NULL, &gpu->device));
 	volkLoadDevice(gpu->device);
 	vkGetDeviceQueue(gpu->device, family, 0, &gpu->queue);
@@ -244,9 +248,16 @@ onino_gpu *onino_open(int index, int validation, uint32_t streams, uint32_t capa
 	VkResult module_result = vkCreateShaderModule(gpu->device, &module_info, NULL, &module);
 	free(code);
 	if (module_result != VK_SUCCESS) { fail(error, error_size, "create shader module", module_result); goto failure; }
-	VkComputePipelineCreateInfo pipeline = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main" }, .layout = gpu->layout };
 	uint64_t compiled = clock_ns();
-	VkResult pipeline_result = vkCreateComputePipelines(gpu->device, VK_NULL_HANDLE, 1, &pipeline, NULL, &gpu->pipeline);
+	VkResult pipeline_result = VK_SUCCESS;
+	for (uint32_t phase = 0; phase < 3; phase++) {
+		uint32_t values[2] = { phase, phase == 1 ? 64 : ONINO_PAIRS };
+		VkSpecializationMapEntry entries[2] = { { .constantID = 0, .offset = 0, .size = 4 }, { .constantID = 1, .offset = 4, .size = 4 } };
+		VkSpecializationInfo specialization = { .mapEntryCount = 2, .pMapEntries = entries, .dataSize = sizeof(values), .pData = values };
+		VkComputePipelineCreateInfo pipeline = { .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO, .stage = { .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main", .pSpecializationInfo = &specialization }, .layout = gpu->layout };
+		pipeline_result = vkCreateComputePipelines(gpu->device, VK_NULL_HANDLE, 1, &pipeline, NULL, &gpu->pipelines[phase]);
+		if (pipeline_result != VK_SUCCESS) { break; }
+	}
 	gpu->cost.pipeline_ns = clock_ns() - compiled;
 	vkDestroyShaderModule(gpu->device, module, NULL);
 	if (pipeline_result != VK_SUCCESS) { fail(error, error_size, "create compute pipeline", pipeline_result); goto failure; }
@@ -255,7 +266,9 @@ onino_gpu *onino_open(int index, int validation, uint32_t streams, uint32_t capa
 	CHECK(vkCreateDescriptorPool(gpu->device, &pool, NULL, &gpu->descriptor_pool));
 	VkCommandPoolCreateInfo command_pool = { .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO, .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = family };
 	CHECK(vkCreateCommandPool(gpu->device, &command_pool, NULL, &gpu->command_pool));
-	VkQueryPoolCreateInfo queries = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_TIMESTAMP, .queryCount = 4 };
+	const char *profile = getenv("ONINO_GPU_PROFILE");
+	gpu->query_stride = profile && strcmp(profile, "1") == 0 ? 195 : 2;
+	VkQueryPoolCreateInfo queries = { .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO, .queryType = VK_QUERY_TYPE_TIMESTAMP, .queryCount = gpu->query_stride * 2 };
 	CHECK(vkCreateQueryPool(gpu->device, &queries, NULL, &gpu->queries));
 	for (uint32_t slot_index = 0; slot_index < 2; slot_index++) {
 		onino_slot *slot = &gpu->slots[slot_index];
@@ -320,6 +333,7 @@ int onino_submit(onino_gpu *gpu, uint32_t slot_index, const onino_command *comma
 	if (slot_index >= 2 || gpu->slots[slot_index].submitted) { return fail(error, error_size, "submission slot still in flight", VK_NOT_READY); }
 	if (!active || active > gpu->stream_count || first > gpu->stream_count || count > gpu->stream_count - first) { return fail(error, error_size, "invalid submission range", VK_ERROR_UNKNOWN); }
 	onino_slot *slot = &gpu->slots[slot_index];
+	if (!rounds || rounds > 64) { return fail(error, error_size, "invalid submission rounds", VK_ERROR_UNKNOWN); }
 	uint64_t started = clock_ns();
 	VkDeviceSize offset = first * sizeof(*commands), bytes = count * sizeof(*commands);
 	if (count) {
@@ -336,8 +350,8 @@ int onino_submit(onino_gpu *gpu, uint32_t slot_index, const onino_command *comma
 	CHECK(vkBeginCommandBuffer(slot->command, &begin));
 	VkMemoryBarrier before = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT, .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT };
 	vkCmdPipelineBarrier(slot->command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &before, 0, NULL, 0, NULL);
-	vkCmdResetQueryPool(slot->command, gpu->queries, slot_index * 2, 2);
-	vkCmdWriteTimestamp(slot->command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpu->queries, slot_index * 2);
+	vkCmdResetQueryPool(slot->command, gpu->queries, slot_index * gpu->query_stride, gpu->query_stride);
+	vkCmdWriteTimestamp(slot->command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, gpu->queries, slot_index * gpu->query_stride);
 	if (count) {
 		VkBufferCopy copy = { .srcOffset = offset, .dstOffset = offset, .size = bytes };
 		vkCmdCopyBuffer(slot->command, slot->upload.buffer, slot->commands.buffer, 1, &copy);
@@ -345,17 +359,19 @@ int onino_submit(onino_gpu *gpu, uint32_t slot_index, const onino_command *comma
 	vkCmdFillBuffer(slot->command, slot->results.buffer, 0, 16, 0);
 	VkMemoryBarrier clear = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT };
 	vkCmdPipelineBarrier(slot->command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &clear, 0, NULL, 0, NULL);
-	vkCmdBindPipeline(slot->command, VK_PIPELINE_BIND_POINT_COMPUTE, gpu->pipeline);
 	vkCmdBindDescriptorSets(slot->command, VK_PIPELINE_BIND_POINT_COMPUTE, gpu->layout, 0, 1, &slot->descriptors, 0, NULL);
 	VkMemoryBarrier phase_barrier = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT };
+	if (gpu->query_stride > 2) { vkCmdWriteTimestamp(slot->command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, gpu->queries, slot_index * gpu->query_stride + 2); }
 	for (uint32_t round = 0; round < rounds; round++) {
 		for (uint32_t phase = ONINO_PREPARE; phase <= ONINO_RECONSTRUCT; phase++) {
+			vkCmdBindPipeline(slot->command, VK_PIPELINE_BIND_POINT_COMPUTE, gpu->pipelines[phase - ONINO_PREPARE]);
 			uint32_t parameters[4] = { phase == ONINO_INVERT ? active : 1, gpu->capacity, collect_only != 0, phase };
 			if (phase == ONINO_PREPARE && round == 0) { parameters[3] = ONINO_PREPARE_FIRST; }
 			if (phase == ONINO_RECONSTRUCT && round + 1 == rounds) { parameters[3] = ONINO_RECONSTRUCT_LAST; }
 			vkCmdPushConstants(slot->command, gpu->layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(parameters), parameters);
 			vkCmdDispatch(slot->command, phase == ONINO_INVERT ? (active + 63) / 64 : active, 1, 1);
 			vkCmdPipelineBarrier(slot->command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &phase_barrier, 0, NULL, 0, NULL);
+			if (gpu->query_stride > 2) { vkCmdWriteTimestamp(slot->command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, gpu->queries, slot_index * gpu->query_stride + 2 + round * 3 + phase); }
 		}
 	}
 	VkMemoryBarrier readback = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT };
@@ -364,7 +380,7 @@ int onino_submit(onino_gpu *gpu, uint32_t slot_index, const onino_command *comma
 	vkCmdCopyBuffer(slot->command, slot->results.buffer, slot->readback.buffer, 1, &result_copy);
 	VkMemoryBarrier after = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER, .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT, .dstAccessMask = VK_ACCESS_HOST_READ_BIT };
 	vkCmdPipelineBarrier(slot->command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &after, 0, NULL, 0, NULL);
-	vkCmdWriteTimestamp(slot->command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu->queries, slot_index * 2 + 1);
+	vkCmdWriteTimestamp(slot->command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, gpu->queries, slot_index * gpu->query_stride + 1);
 	CHECK(vkEndCommandBuffer(slot->command));
 	gpu->cost.recordings++;
 	slot->reusable = count == 0;
@@ -388,7 +404,15 @@ int onino_collect(onino_gpu *gpu, uint32_t slot_index, const onino_result **resu
 	CHECK(vkWaitForFences(gpu->device, 1, &slot->fence, VK_TRUE, UINT64_MAX));
 	CHECK(buffer_sync(gpu, &slot->readback, 0));
 	uint64_t timestamps[2];
-	CHECK(vkGetQueryPoolResults(gpu->device, gpu->queries, slot_index * 2, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT));
+	CHECK(vkGetQueryPoolResults(gpu->device, gpu->queries, slot_index * gpu->query_stride, 2, sizeof(timestamps), timestamps, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT));
+	if (gpu->query_stride > 2) {
+		uint64_t phases[193];
+		uint32_t count = slot->recorded_rounds * 3 + 1;
+		CHECK(vkGetQueryPoolResults(gpu->device, gpu->queries, slot_index * gpu->query_stride + 2, count, sizeof(phases), phases, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT));
+		uint64_t mask = gpu->timestamp_bits < 64 ? (UINT64_C(1) << gpu->timestamp_bits) - 1 : UINT64_MAX;
+		for (uint32_t phase = 0; phase + 1 < count; phase++) { gpu->phase_ticks[phase % 3] += (phases[phase + 1] - phases[phase]) & mask; }
+		gpu->profiled_rounds += slot->recorded_rounds;
+	}
 	uint64_t ticks = timestamps[1] - timestamps[0];
 	uint64_t gap_ticks = gpu->have_timestamp ? timestamps[0] - gpu->last_timestamp : 0;
 	if (gpu->timestamp_bits < 64) { ticks &= (UINT64_C(1) << gpu->timestamp_bits) - 1; }
@@ -405,6 +429,7 @@ failure:
 }
 void onino_close(onino_gpu *gpu) {
 	if (!gpu) { return; }
+	if (gpu->profiled_rounds) { fprintf(stderr, "GPU diagnostic: profile rounds=%llu prepare_ns=%.0f invert_ns=%.0f reconstruct_ns=%.0f\n", (unsigned long long)gpu->profiled_rounds, gpu->phase_ticks[0] * (double)gpu->timestamp_period, gpu->phase_ticks[1] * (double)gpu->timestamp_period, gpu->phase_ticks[2] * (double)gpu->timestamp_period); }
 	uint64_t started = clock_ns();
 	if (gpu->device) {
 		if (gpu->diagnostics) { fprintf(stderr, "GPU diagnostic: teardown wait_idle\n"); }
@@ -423,7 +448,9 @@ void onino_close(onino_gpu *gpu) {
 		if (gpu->queries) { vkDestroyQueryPool(gpu->device, gpu->queries, NULL); }
 		if (gpu->command_pool) { vkDestroyCommandPool(gpu->device, gpu->command_pool, NULL); }
 		if (gpu->descriptor_pool) { vkDestroyDescriptorPool(gpu->device, gpu->descriptor_pool, NULL); }
-		if (gpu->pipeline) { vkDestroyPipeline(gpu->device, gpu->pipeline, NULL); }
+		for (uint32_t phase = 0; phase < 3; phase++) {
+			if (gpu->pipelines[phase]) { vkDestroyPipeline(gpu->device, gpu->pipelines[phase], NULL); }
+		}
 		if (gpu->layout) { vkDestroyPipelineLayout(gpu->device, gpu->layout, NULL); }
 		if (gpu->descriptors) { vkDestroyDescriptorSetLayout(gpu->device, gpu->descriptors, NULL); }
 		if (gpu->diagnostics) { fprintf(stderr, "GPU diagnostic: teardown destroy_device elapsed_ms=%.3f\n", (clock_ns() - started) / 1e6); }

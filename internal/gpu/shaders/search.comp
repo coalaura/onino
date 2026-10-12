@@ -1,35 +1,46 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #include "field.glsl"
-
-#ifndef ONINO_INITIAL_STEPS
-#define ONINO_INITIAL_STEPS 64u
+#ifdef ONINO_DIAGNOSTIC
+#include "diagnostic.glsl"
 #endif
 
+#ifndef ONINO_INITIAL_STEPS
+#define ONINO_INITIAL_STEPS 128
+#endif
+
+const uint pairCount = 128;
 const uint prepareFirst = 0;
-const uint prepare = 1;
-const uint invertRoots = 2;
-const uint reconstruct = 3;
 const uint reconstructLast = 4;
 
-layout(local_size_x = 64) in;
+layout(constant_id = 0) const uint kernelPhase = 0;
+layout(local_size_x = 128, local_size_x_id = 1) in;
 struct Affine { Field x; Field y; Field xy; };
 // All storage layouts deliberately use uint words, avoiding host ABI padding.
-struct Stream { Affine center; uint generation; uint steps; uint cursor; uint status; uint hitSteps; uint kind; uint low; uint high; uint completed; Field scratch[128]; };
+struct Stream { Affine center; uint generation; uint steps; uint cursor; uint status; uint hitSteps; uint kind; uint low; uint high; uint completed; uint scratch[8][2 * pairCount]; };
 struct Command { Affine center; uint expected; uint generation; uint action; };
 struct Probe { uint lowMask; uint highMask; uint lowValue; uint highValue; };
 struct Hit { uint stream; uint generation; uint steps; uint kind; uint low; uint high; };
 layout(std430, binding = 0) buffer Streams { Stream streams[]; };
-layout(std430, binding = 1) readonly buffer Tables { Affine offsets[65]; Probe probes[8]; uint probeCount; };
+layout(std430, binding = 1) readonly buffer Tables { Affine offsets[pairCount + 1]; Probe probes[8]; uint probeCount; };
 layout(std430, binding = 2) buffer Commands { Command commands[]; };
 layout(std430, binding = 3) buffer Results { uint count; uint checked; uint pending; uint reserved; Hit hits[]; };
 layout(push_constant) uniform Parameters { uint work; uint capacity; uint collectOnly; uint phase; } parameters;
 
-shared Field products[128];
+// Neighboring lanes access neighboring nodes for each limb.
+Field readNode(uint streamIndex, uint node) {
+	Field value;
+	for (uint limb = 0; limb < 8; limb++) { value.limb[limb] = streams[streamIndex].scratch[limb][node]; }
+	return value;
+}
+void writeNode(uint streamIndex, uint node, Field value) {
+	for (uint limb = 0; limb < 8; limb++) { streams[streamIndex].scratch[limb][node] = value.limb[limb]; }
+}
+
+shared Field products[kernelPhase == 1 ? 1 : 2 * pairCount];
 shared uint winner;
 shared uint running;
 #ifdef ONINO_DIAGNOSTIC
-shared Field matchedY;
 shared uint matchedSign;
 #endif
 
@@ -51,15 +62,15 @@ void publish(uint streamIndex) {
 	} else { atomicAdd(pending, 1); }
 }
 void main() {
-	// Adjacent invocations invert independent roots; the surrounding passes retain 64 lanes per stream.
-	if (parameters.phase == invertRoots) {
+	// Adjacent invocations invert independent stream roots, with a separate 64-lane pipeline.
+	if (kernelPhase == 1) {
 		uint index = gl_GlobalInvocationID.x;
 		if (index >= parameters.work || streams[index].status != 0 || parameters.collectOnly != 0) { return; }
-		Field root = streams[index].scratch[1];
-		Field jump = streams[index].scratch[0];
+		Field root = readNode(index, 1);
+		Field jump = readNode(index, 0);
 		Field combined = inverse(mul(root, jump));
-		streams[index].scratch[1] = mul(jump, combined);
-		streams[index].scratch[0] = mul(root, combined);
+		writeNode(index, 1, mul(jump, combined));
+		writeNode(index, 0, mul(root, combined));
 		return;
 	}
 	uint streamIndex = gl_WorkGroupID.x;
@@ -68,7 +79,7 @@ void main() {
 	if (lane == 0) {
 		if (parameters.phase == prepareFirst) { streams[streamIndex].completed = 0; }
 		Command command = commands[streamIndex];
-		if (parameters.phase >= reconstruct) { command.action = 0; }
+		if (kernelPhase == 2) { command.action = 0; }
 		if (command.action != 0 && command.expected == streams[streamIndex].generation) {
 			if (command.action == 2) {
 				streams[streamIndex].center = command.center;
@@ -89,29 +100,27 @@ void main() {
 		Field productX = mul(stream.center.x, offset.x);
 		Field productY = mul(stream.center.y, offset.y);
 		Field mixed = mul(stream.center.xy, offset.xy);
-		if (parameters.phase <= prepare) {
-			products[64 + lane] = sub(small(1), square(mixed));
-			if (lane == 0) { winner = 128; }
+		if (kernelPhase == 0) {
+			products[pairCount + lane] = sub(small(1), square(mixed));
 			barrier();
-			for (uint size = 32; size > 0; size >>= 1) {
+			for (uint size = pairCount / 2; size > 0; size >>= 1) {
 				if (lane < size) { products[size + lane] = mul(products[2 * (size + lane)], products[2 * (size + lane) + 1]); }
 				barrier();
 			}
 			if (lane == 0) {
-				Field mixedJump = mul(stream.center.xy, offsets[64].xy);
-				Field denominatorJump = sub(small(1), square(mixedJump));
-				products[0] = denominatorJump;
+				Field mixedJump = mul(stream.center.xy, offsets[pairCount].xy);
+				products[0] = sub(small(1), square(mixedJump));
 			}
 			barrier();
-			streams[streamIndex].scratch[lane] = products[lane];
-			streams[streamIndex].scratch[64 + lane] = products[64 + lane];
+			writeNode(streamIndex, lane, products[lane]);
+			writeNode(streamIndex, pairCount + lane, products[pairCount + lane]);
 			return;
 		}
-		products[lane] = streams[streamIndex].scratch[lane];
-		products[64 + lane] = streams[streamIndex].scratch[64 + lane];
-		if (lane == 0) { winner = 128; }
+		products[lane] = readNode(streamIndex, lane);
+		products[pairCount + lane] = readNode(streamIndex, pairCount + lane);
+		if (lane == 0) { winner = 2 * pairCount; }
 		barrier();
-		for (uint size = 1; size < 64; size <<= 1) {
+		for (uint size = 1; size < pairCount; size <<= 1) {
 			if (lane < size) {
 				uint node = size + lane;
 				Field left = products[2 * node];
@@ -121,7 +130,7 @@ void main() {
 			}
 			barrier();
 		}
-		Field reciprocal = products[64 + lane];
+		Field reciprocal = products[pairCount + lane];
 		Field factor = mul(mixed, reciprocal);
 		Field plus = canonical(mul(add(productY, productX), add(reciprocal, factor)));
 		Field minus = canonical(mul(sub(productY, productX), sub(reciprocal, factor)));
@@ -132,14 +141,13 @@ void main() {
 		barrier();
 		if (winner / 2 == lane) {
 #ifdef ONINO_DIAGNOSTIC
-			matchedY = (winner & 1) == 0 ? plus : minus;
 			Field crossFirst = mul(stream.center.x, offset.y);
 			Field crossSecond = mul(stream.center.y, offset.x);
 			Field abscissa = (winner & 1) == 0 ? mul(add(crossFirst, crossSecond), sub(reciprocal, factor)) : mul(sub(crossFirst, crossSecond), add(reciprocal, factor));
 			matchedSign = canonical(abscissa).limb[0] & 1;
 			// A match may precede the final pass; shared memory does not survive a dispatch.
-			streams[streamIndex].scratch[2] = matchedY;
-			streams[streamIndex].scratch[3].limb[0] = matchedSign;
+			writeNode(streamIndex, 2, (winner & 1) == 0 ? plus : minus);
+			writeNode(streamIndex, 3, small(matchedSign));
 #endif
 			uint64_t word = firstWord((winner & 1) == 0 ? plus : minus);
 			streams[streamIndex].low = uint(word);
@@ -149,17 +157,17 @@ void main() {
 		}
 		barrier();
 		if (lane == 0) {
-			localChecked += min(winner + 1, 128u) - stream.cursor;
-			if (winner < 128) {
+			localChecked += min(winner + 1, 2 * pairCount) - stream.cursor;
+			if (winner < 2 * pairCount) {
 				streams[streamIndex].cursor = winner + 1;
 				streams[streamIndex].status = 1;
 				running = 0;
-			} else if (stream.steps > 0xffffffffu - 193u) {
+			} else if (stream.steps > 0xffffffffu - (3 * pairCount + 1)) {
 				streams[streamIndex].kind = 1;
 				streams[streamIndex].status = 1;
 				running = 0;
 			} else {
-				Affine jump = offsets[64];
+				Affine jump = offsets[pairCount];
 				Field mixedJump = mul(stream.center.xy, jump.xy);
 				Field reciprocalJump = products[0];
 				Field factorJump = mul(mixedJump, reciprocalJump);
@@ -170,7 +178,7 @@ void main() {
 				next.y = mul(numeratorY, add(reciprocalJump, factorJump));
 				next.xy = mul(next.x, next.y);
 				streams[streamIndex].center = next;
-				streams[streamIndex].steps = stream.steps + 129;
+				streams[streamIndex].steps = stream.steps + 2 * pairCount + 1;
 				streams[streamIndex].cursor = 0;
 			}
 		}
@@ -187,10 +195,10 @@ void main() {
 #ifdef ONINO_DIAGNOSTIC
 	// Test-only full encoding of the selected candidate, using two ordinary record slots.
 	if (lane == 0 && parameters.phase == reconstructLast) {
-		matchedY = streams[streamIndex].scratch[2];
-		matchedSign = streams[streamIndex].scratch[3].limb[0];
-		hits[streamIndex * 2] = Hit(streams[streamIndex].hitSteps, streams[streamIndex].generation, matchedY.limb[0], matchedY.limb[1], matchedY.limb[2], matchedY.limb[3]);
-		hits[streamIndex * 2 + 1] = Hit(matchedY.limb[4], matchedY.limb[5], matchedY.limb[6], matchedY.limb[7], matchedY.limb[8], matchedY.limb[9] | (matchedSign << 25));
+		Encoding encoded = storageLimbs(readNode(streamIndex, 2));
+		matchedSign = readNode(streamIndex, 3).limb[0];
+		hits[streamIndex * 2] = Hit(streams[streamIndex].hitSteps, streams[streamIndex].generation, encoded.limb[0], encoded.limb[1], encoded.limb[2], encoded.limb[3]);
+		hits[streamIndex * 2 + 1] = Hit(encoded.limb[4], encoded.limb[5], encoded.limb[6], encoded.limb[7], encoded.limb[8], encoded.limb[9] | (matchedSign << 25));
 		atomicAdd(count, 1);
 	}
 #endif

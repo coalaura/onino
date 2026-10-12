@@ -14,6 +14,8 @@ import (
 	"github.com/coalaura/onino/internal/onion"
 )
 
+const pairCount = 128
+
 type seed struct {
 	secret     [64]byte
 	generation uint32
@@ -38,7 +40,7 @@ func newSeed(generation uint32) (seed, command, error) {
 			continue
 		}
 
-		center := offsetSecret(secret, 64)
+		center := offsetSecret(secret, pairCount)
 
 		scalar, err := new(edwards25519.Scalar).SetBytesWithClamping(center[:32])
 		if err != nil {
@@ -66,13 +68,13 @@ func reconstruct(secret [64]byte, steps uint32) (onion.Key, error) {
 }
 
 func makeTable(plan Plan) []uint32 {
-	table := make([]uint32, 65*30+8*4+1)
+	table := make([]uint32, (pairCount+1)*24+8*4+1)
 
-	for index := range 65 {
+	for index := range pairCount + 1 {
 		steps := uint64(index + 1)
 
-		if index == 64 {
-			steps = 129
+		if index == pairCount {
+			steps = 2*pairCount + 1
 		}
 
 		var encoded [32]byte
@@ -83,11 +85,11 @@ func makeTable(plan Plan) []uint32 {
 		point := new(edwards25519.Point).ScalarBaseMult(scalar)
 
 		coordinates := affine(point, true)
-		copy(table[index*30:], coordinates[:])
+		copy(table[index*24:], coordinates[:])
 	}
 
 	for index := range plan.probes {
-		copy(table[65*30+index*4:], plan.probes[index][:])
+		copy(table[(pairCount+1)*24+index*4:], plan.probes[index][:])
 	}
 
 	table[len(table)-1] = plan.count
@@ -95,7 +97,7 @@ func makeTable(plan Plan) []uint32 {
 	return table
 }
 
-func affine(point *edwards25519.Point, withD bool) [30]uint32 {
+func affine(point *edwards25519.Point, withD bool) [24]uint32 {
 	xCoordinate, yCoordinate, zCoordinate, _ := point.ExtendedCoordinates()
 
 	var (
@@ -126,25 +128,18 @@ func affine(point *edwards25519.Point, withD bool) [30]uint32 {
 		mixed.Multiply(&mixed, first)
 	}
 
-	var result [30]uint32
+	var result [24]uint32
 
-	putLimbs(result[:10], xCoordinate.Bytes())
-	putLimbs(result[10:20], yCoordinate.Bytes())
-	putLimbs(result[20:], mixed.Bytes())
+	putLimbs(result[:8], xCoordinate.Bytes())
+	putLimbs(result[8:16], yCoordinate.Bytes())
+	putLimbs(result[16:], mixed.Bytes())
 
 	return result
 }
 
 func putLimbs(destination []uint32, encoded []byte) {
-	position := 0
-
 	for index := range destination {
-		width := 26 - index%2
-
-		for bit := range width {
-			destination[index] |= uint32((encoded[position/8]>>(position%8))&1) << bit
-			position++
-		}
+		destination[index] = binary.LittleEndian.Uint32(encoded[index*4:])
 	}
 }
 

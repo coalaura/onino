@@ -20,7 +20,7 @@ import (
 )
 
 type command struct {
-	Center     [30]uint32
+	Center     [24]uint32
 	Expected   uint32
 	Generation uint32
 	Action     uint32

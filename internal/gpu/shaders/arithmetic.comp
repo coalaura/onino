@@ -1,6 +1,7 @@
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #include "field.glsl"
+#include "diagnostic.glsl"
 layout(local_size_x = 64) in;
 struct Command { Field first; Field second; Field unused; uint expected; uint generation; uint operation; };
 layout(std430, binding = 2) readonly buffer Commands { Command commands[]; };
@@ -23,14 +24,15 @@ void main() {
 		case 7: result = mul(sub(command.first, command.second), add(command.first, command.second)); break;
 		default: result = inverse(command.first); break;
 	}
-	uint boundFailures = 0;
-	uint boundFactor = command.operation == 0 ? 2u : (command.operation == 1 ? 3u : 1u);
-	for (uint limb = 0; limb < 10; limb++) { boundFailures |= uint(result.limb[limb] >= boundFactor * (1u << width(limb))); }
-	if (command.operation <= 1) { result = normalize(result); }
-	for (uint limb = 0; limb < 10; limb++) { boundFailures |= uint(result.limb[limb] > mask(limb)); }
 	result = canonical(result);
-	for (uint limb = 0; limb < 10; limb++) { words[index * 12 + limb] = result.limb[limb]; }
-	words[index * 12 + 10] = boundFailures;
+	bool noncanonical = true;
+	for (int limb = 7; limb >= 0; limb--) {
+		uint prime = limb == 7 ? 0x7fffffffu : (limb == 0 ? 0xffffffedu : 0xffffffffu);
+		if (result.limb[limb] != prime) { noncanonical = result.limb[limb] > prime; break; }
+	}
+	Encoding encoded = storageLimbs(result);
+	for (uint limb = 0; limb < 10; limb++) { words[index * 12 + limb] = encoded.limb[limb]; }
+	words[index * 12 + 10] = uint(noncanonical);
 	words[index * 12 + 11] = 0;
 	if (index == 0) { count = gl_NumWorkGroups.x * 2; }
 }

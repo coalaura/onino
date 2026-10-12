@@ -4,7 +4,7 @@
 #include <stddef.h>
 
 typedef struct onino_gpu onino_gpu;
-typedef struct { uint32_t center[30], expected, generation, action; } onino_command;
+typedef struct { uint32_t center[24], expected, generation, action; } onino_command;
 typedef struct { uint32_t stream, generation, steps, kind, low, high; } onino_hit;
 typedef struct {
 	uint32_t count, checked, pending, reserved;

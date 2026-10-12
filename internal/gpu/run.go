@@ -329,16 +329,19 @@ func drainUpdates(refills <-chan feedback, commands []command, first, last int) 
 	for {
 		select {
 		case refill := <-refills:
-			commands[refill.stream] = refill.command
-
-			if first == len(commands) {
-				last = int(refill.stream) + 1
-			}
-
-			first = min(first, int(refill.stream))
-			last = max(last, int(refill.stream)+1)
+			first, last = applyUpdate(refill, commands, first, last)
 		default:
 			return first, last
 		}
 	}
+}
+
+func applyUpdate(refill feedback, commands []command, first, last int) (int, int) {
+	commands[refill.stream] = refill.command
+
+	if first == len(commands) {
+		last = int(refill.stream) + 1
+	}
+
+	return min(first, int(refill.stream)), max(last, int(refill.stream)+1)
 }
