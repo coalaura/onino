@@ -19,7 +19,7 @@ _Static_assert(sizeof(onino_command) == 108, "shader command layout");
 _Static_assert(sizeof(onino_hit) == 24, "shader hit layout");
 _Static_assert(sizeof(onino_result) == 16, "shader result header layout");
 
-enum { ONINO_PAIRS = 128, ONINO_STREAM_BYTES = 8324, ONINO_STREAM_BUDGET = 12288 };
+enum { ONINO_PAIRS = 128, ONINO_STREAM_BYTES = 4324, ONINO_STREAM_BUDGET = 12288 };
 enum { ONINO_PREPARE_FIRST, ONINO_PREPARE, ONINO_INVERT, ONINO_RECONSTRUCT, ONINO_RECONSTRUCT_LAST };
 
 typedef struct {

@@ -14,6 +14,7 @@ const (
 	submissionLimit   = 150 * time.Millisecond
 	flightLimit       = 120 * time.Millisecond
 	trialDuration     = 300 * time.Millisecond
+	tuningNoise       = 0.01
 	transitionReserve = 500 * time.Millisecond
 )
 
@@ -131,7 +132,7 @@ func (tuner *calibration) selectInitial() (observation, error) {
 
 		incumbent = candidate
 
-		if better(candidate, fallback, 0.025) {
+		if better(candidate, fallback, tuningNoise) {
 			fallback = candidate
 		}
 
@@ -170,10 +171,10 @@ func (tuner *calibration) selectInitial() (observation, error) {
 			return best, measureError
 		}
 
-		if better(candidate, best, 0.025) {
+		if better(candidate, best, tuningNoise) {
 			runner = best
 			best = candidate
-		} else if candidate.configuration != best.configuration && (runner.configuration == best.configuration || better(candidate, runner, 0.025)) {
+		} else if candidate.configuration != best.configuration && (runner.configuration == best.configuration || better(candidate, runner, tuningNoise)) {
 			runner = candidate
 		}
 	}
@@ -207,7 +208,7 @@ func (tuner *calibration) selectInitial() (observation, error) {
 	best.rate = repeated.rate
 	best.tail = max(best.tail, repeated.tail)
 
-	if better(best, runner, max(0.025, noise)) {
+	if better(best, runner, max(tuningNoise, noise)) {
 		return best, nil
 	}
 

@@ -17,7 +17,7 @@ layout(constant_id = 0) const uint kernelPhase = 0;
 layout(local_size_x = 128, local_size_x_id = 1) in;
 struct Affine { Field x; Field y; Field xy; };
 // All storage layouts deliberately use uint words, avoiding host ABI padding.
-struct Stream { Affine center; uint generation; uint steps; uint cursor; uint status; uint hitSteps; uint kind; uint low; uint high; uint completed; uint scratch[8][2 * pairCount]; };
+struct Stream { Affine center; uint generation; uint steps; uint cursor; uint status; uint hitSteps; uint kind; uint low; uint high; uint completed; uint scratch[8][pairCount]; Affine next; };
 struct Command { Affine center; uint expected; uint generation; uint action; };
 struct Probe { uint lowMask; uint highMask; uint lowValue; uint highValue; };
 struct Hit { uint stream; uint generation; uint steps; uint kind; uint low; uint high; };
@@ -44,8 +44,7 @@ shared uint running;
 shared uint matchedSign;
 #endif
 
-bool matches(Field ordinate) {
-	uint64_t word = firstWord(ordinate);
+bool matches(uint64_t word) {
 	for (uint index = 0; index < probeCount; index++) {
 		Probe probe = probes[index];
 		if ((uint(word) & probe.lowMask) == probe.lowValue && (uint(word >> 32) & probe.highMask) == probe.highValue) { return true; }
@@ -70,7 +69,19 @@ void main() {
 		Field jump = readNode(index, 0);
 		Field combined = inverse(mul(root, jump));
 		writeNode(index, 1, mul(jump, combined));
-		writeNode(index, 0, mul(root, combined));
+		Field reciprocalJump = mul(root, combined);
+		Affine center = streams[index].center;
+		Affine offset = offsets[pairCount];
+		Field mixedJump = mul(center.xy, offset.xy);
+		Field factorJump = mul(mixedJump, reciprocalJump);
+		Field numeratorX = add(mul(center.x, offset.y), mul(center.y, offset.x));
+		Field numeratorY = add(mul(center.y, offset.y), mul(center.x, offset.x));
+		Affine next;
+		next.x = mul(numeratorX, sub(reciprocalJump, factorJump));
+		next.y = mul(numeratorY, add(reciprocalJump, factorJump));
+		next.xy = mul(next.x, next.y);
+		// Reconstruction still uses the old center; only a no-hit round commits this.
+		streams[index].next = next;
 		return;
 	}
 	uint streamIndex = gl_WorkGroupID.x;
@@ -113,31 +124,31 @@ void main() {
 			}
 			barrier();
 			writeNode(streamIndex, lane, products[lane]);
-			writeNode(streamIndex, pairCount + lane, products[pairCount + lane]);
 			return;
 		}
 		products[lane] = readNode(streamIndex, lane);
-		products[pairCount + lane] = readNode(streamIndex, pairCount + lane);
+		products[pairCount + lane] = sub(small(1), square(mixed));
 		if (lane == 0) { winner = 2 * pairCount; }
 		barrier();
 		for (uint size = 1; size < pairCount; size <<= 1) {
-			if (lane < size) {
-				uint node = size + lane;
-				Field left = products[2 * node];
-				Field right = products[2 * node + 1];
-				products[2 * node] = mul(products[node], right);
-				products[2 * node + 1] = mul(products[node], left);
-			}
+			Field child;
+			uint node = 2 * size + lane;
+			if (lane < 2 * size) { child = mul(products[node / 2], products[node ^ 1]); }
+			// Both sibling values must be consumed before either is overwritten.
+			barrier();
+			if (lane < 2 * size) { products[node] = child; }
 			barrier();
 		}
 		Field reciprocal = products[pairCount + lane];
 		Field factor = mul(mixed, reciprocal);
-		Field plus = canonical(mul(add(productY, productX), add(reciprocal, factor)));
-		Field minus = canonical(mul(sub(productY, productX), sub(reciprocal, factor)));
+		Field plus = mul(add(productY, productX), add(reciprocal, factor));
+		Field minus = mul(sub(productY, productX), sub(reciprocal, factor));
+		uint64_t plusWord = canonicalFirstWord(plus);
+		uint64_t minusWord = canonicalFirstWord(minus);
 		uint plusIndex = 2 * lane;
 		uint minusIndex = plusIndex + 1;
-		if (plusIndex >= stream.cursor && matches(plus)) { atomicMin(winner, plusIndex); }
-		if (minusIndex >= stream.cursor && matches(minus)) { atomicMin(winner, minusIndex); }
+		if (plusIndex >= stream.cursor && matches(plusWord)) { atomicMin(winner, plusIndex); }
+		if (minusIndex >= stream.cursor && matches(minusWord)) { atomicMin(winner, minusIndex); }
 		barrier();
 		if (winner / 2 == lane) {
 #ifdef ONINO_DIAGNOSTIC
@@ -146,10 +157,10 @@ void main() {
 			Field abscissa = (winner & 1) == 0 ? mul(add(crossFirst, crossSecond), sub(reciprocal, factor)) : mul(sub(crossFirst, crossSecond), add(reciprocal, factor));
 			matchedSign = canonical(abscissa).limb[0] & 1;
 			// A match may precede the final pass; shared memory does not survive a dispatch.
-			writeNode(streamIndex, 2, (winner & 1) == 0 ? plus : minus);
+			writeNode(streamIndex, 2, canonical((winner & 1) == 0 ? plus : minus));
 			writeNode(streamIndex, 3, small(matchedSign));
 #endif
-			uint64_t word = firstWord((winner & 1) == 0 ? plus : minus);
+			uint64_t word = (winner & 1) == 0 ? plusWord : minusWord;
 			streams[streamIndex].low = uint(word);
 			streams[streamIndex].high = uint(word >> 32);
 			streams[streamIndex].hitSteps = (winner & 1) == 0 ? stream.steps + lane + 1 : stream.steps - lane - 1;
@@ -167,17 +178,7 @@ void main() {
 				streams[streamIndex].status = 1;
 				running = 0;
 			} else {
-				Affine jump = offsets[pairCount];
-				Field mixedJump = mul(stream.center.xy, jump.xy);
-				Field reciprocalJump = products[0];
-				Field factorJump = mul(mixedJump, reciprocalJump);
-				Field numeratorX = add(mul(stream.center.x, jump.y), mul(stream.center.y, jump.x));
-				Field numeratorY = add(mul(stream.center.y, jump.y), mul(stream.center.x, jump.x));
-				Affine next;
-				next.x = mul(numeratorX, sub(reciprocalJump, factorJump));
-				next.y = mul(numeratorY, add(reciprocalJump, factorJump));
-				next.xy = mul(next.x, next.y);
-				streams[streamIndex].center = next;
+				streams[streamIndex].center = stream.next;
 				streams[streamIndex].steps = stream.steps + 2 * pairCount + 1;
 				streams[streamIndex].cursor = 0;
 			}

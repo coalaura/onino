@@ -29,17 +29,15 @@ Field small(uint value) {
 	return result;
 }
 Field fold(Field value, uint carry) {
-	// The first adjustment is at most 38*38=1444. If it wraps again,
-	// the low word is <=1443, so the final +38 cannot wrap the full number.
-	for (uint pass = 0; pass < 2; pass++) {
-		uint64_t adjustment = uint64_t(carry) * 38ul;
-		for (uint index = 0; index < 8; index++) {
-			uint64_t sum = uint64_t(value.limb[index]) + adjustment;
-			value.limb[index] = uint(sum);
-			adjustment = sum >> 32;
-		}
-		carry = uint(adjustment);
+	// add supplies carry <=1; reduceProduct supplies carry <=38. After
+	// wrapping an adjustment <=1444, the entire value is <=1443.
+	uint64_t adjustment = uint64_t(carry) * 38ul;
+	for (uint index = 0; index < 8; index++) {
+		uint64_t sum = uint64_t(value.limb[index]) + adjustment;
+		value.limb[index] = uint(sum);
+		adjustment = sum >> 32;
 	}
+	value.limb[0] += uint(adjustment) * 38;
 	return value;
 }
 Field add(Field first, Field second) {
@@ -60,16 +58,15 @@ Field sub(Field first, Field second) {
 		result.limb[index] = uint(difference);
 		borrow = uint(difference >> 63);
 	}
-	// Unsigned subtraction is intentional. A wrapped -38 can need one more
-	// correction; then the represented value is near 2^256, so it cannot wrap again.
-	for (uint pass = 0; pass < 2; pass++) {
-		borrow *= 38;
-		for (uint index = 0; index < 8; index++) {
-			uint64_t difference = uint64_t(result.limb[index]) - borrow;
-			result.limb[index] = uint(difference);
-			borrow = uint(difference >> 63);
-		}
+	// If the first -38 borrows, its wrapped low limb is >=2^32-38;
+	// the second -38 therefore cannot borrow into the next limb.
+	borrow *= 38;
+	for (uint index = 0; index < 8; index++) {
+		uint64_t difference = uint64_t(result.limb[index]) - borrow;
+		result.limb[index] = uint(difference);
+		borrow = uint(difference >> 63);
 	}
+	result.limb[0] -= borrow * 38;
 	return result;
 }
 Field reduceProduct(uint product[16]) {
@@ -143,3 +140,12 @@ Field canonical(Field value) {
 	return value;
 }
 uint64_t firstWord(Field value) { return uint64_t(value.limb[0]) | (uint64_t(value.limb[1]) << 32); }
+uint64_t canonicalFirstWord(Field value) {
+	// q=[v>=p]+[v>=2p]. The top bit supplies the ordinary subtraction;
+	// the all-ones suffix detects p's final 19 and 2p's final 38 inputs.
+	uint quotient = value.limb[7] >> 31;
+	uint upper = value.limb[7] | 0x80000000u;
+	for (uint index = 1; index < 7; index++) { upper &= value.limb[index]; }
+	quotient += uint(upper == 0xffffffffu && value.limb[0] >= 0xffffffedu - 19 * quotient);
+	return firstWord(value) + 19ul * quotient;
+}

@@ -98,6 +98,16 @@ func TestTuningNoiseAndResponsiveness(t *testing.T) {
 		t.Fatal("noise justified more expensive configuration")
 	}
 
+	if !better(candidate, incumbent, tuningNoise) {
+		t.Fatal("stable two-percent improvement was discarded as a latency tie")
+	}
+
+	candidate.rate = 100.5
+
+	if better(candidate, incumbent, tuningNoise) {
+		t.Fatal("sub-percent difference justified more expensive configuration")
+	}
+
 	candidate.rate = 110
 
 	if !better(candidate, incumbent, 0.025) || better(candidate, incumbent, 0.15) {
