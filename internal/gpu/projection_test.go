@@ -26,7 +26,7 @@ func TestRawFieldCorrections(t *testing.T) {
 		}
 	}
 
-	commands := make([]command, 0, 8192)
+	commands := make([]command, 0, 16384)
 	expected := make([][32]byte, 0, cap(commands))
 
 	appendCase := func(operation uint32, first, second *big.Int, carry uint32) {
@@ -63,6 +63,15 @@ func TestRawFieldCorrections(t *testing.T) {
 			}
 		case 11:
 			result.Mod(result, prime)
+		case 13:
+			adjustment := new(big.Int).SetUint64(uint64(carry) * 38)
+
+			for range 64 {
+				result.Add(result, second)
+				result.Mul(result, result)
+				result.Sub(result, first)
+				result.Add(result, adjustment).Mod(result, prime)
+			}
 		}
 
 		commands = append(commands, update)
@@ -73,13 +82,29 @@ func TestRawFieldCorrections(t *testing.T) {
 		appendCase(11, value, big.NewInt(0), 0)
 		appendCase(8, value, new(big.Int).Sub(limit, big.NewInt(1)), 0)
 		appendCase(9, big.NewInt(0), value, 0)
+		appendCase(13, value, new(big.Int).Sub(limit, big.NewInt(1)), 38)
 	}
 
 	for carry := uint32(0); carry <= 38; carry++ {
-		for delta := int64(-2); delta <= 2; delta++ {
-			boundary := new(big.Int).Sub(limit, big.NewInt(int64(carry)*38+delta))
+		for bit := uint(32); bit <= 256; bit += 32 {
+			for delta := int64(-2); delta <= 2; delta++ {
+				boundary := new(big.Int).Lsh(big.NewInt(1), bit)
+				boundary.Sub(boundary, big.NewInt(int64(carry)*38+delta))
+
+				if boundary.Sign() >= 0 && boundary.Cmp(limit) < 0 {
+					appendCase(10, boundary, big.NewInt(0), carry)
+				}
+			}
+		}
+	}
+
+	for bit := uint(32); bit <= 256; bit += 32 {
+		for delta := int64(-40); delta <= 40; delta++ {
+			boundary := new(big.Int).Lsh(big.NewInt(1), bit)
+			boundary.Sub(limit, boundary).Add(boundary, big.NewInt(delta))
+
 			if boundary.Sign() >= 0 && boundary.Cmp(limit) < 0 {
-				appendCase(10, boundary, big.NewInt(0), carry)
+				appendCase(9, big.NewInt(0), boundary, 0)
 			}
 		}
 	}

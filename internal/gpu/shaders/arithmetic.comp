@@ -32,6 +32,16 @@ void main() {
 			result.limb[0] = uint(word);
 			result.limb[1] = uint(word >> 32);
 			break;
+		case 13:
+			result = command.first;
+			for (uint iteration = 0; iteration < 64; iteration++) {
+				result = add(result, command.second);
+				result = mul(result, result);
+				result = sub(result, command.first);
+				result = fold(result, command.expected);
+			}
+			result = canonical(result);
+			break;
 		default: result = inverse(command.first); break;
 	}
 	if (command.operation >= 8) {

@@ -17,7 +17,7 @@ import (
 const (
 	DefaultStreams = 256
 	DefaultRounds  = 4
-	MaxStreams     = 16384
+	MaxStreams     = 32768
 	MaxRounds      = 64
 )
 

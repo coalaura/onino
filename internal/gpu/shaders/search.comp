@@ -44,12 +44,14 @@ shared uint running;
 shared uint matchedSign;
 #endif
 
-bool matches(uint64_t word) {
+bvec2 matchesPair(uint64_t plusWord, uint64_t minusWord) {
+	bvec2 result = bvec2(false);
 	for (uint index = 0; index < probeCount; index++) {
 		Probe probe = probes[index];
-		if ((uint(word) & probe.lowMask) == probe.lowValue && (uint(word >> 32) & probe.highMask) == probe.highValue) { return true; }
+		result.x = result.x || ((uint(plusWord) & probe.lowMask) == probe.lowValue && (uint(plusWord >> 32) & probe.highMask) == probe.highValue);
+		result.y = result.y || ((uint(minusWord) & probe.lowMask) == probe.lowValue && (uint(minusWord >> 32) & probe.highMask) == probe.highValue);
 	}
-	return false;
+	return result;
 }
 void publish(uint streamIndex) {
 	if (streams[streamIndex].status != 1) { return; }
@@ -103,9 +105,11 @@ void main() {
 		commands[streamIndex].action = 0;
 		running = uint(streams[streamIndex].status == 0 && parameters.collectOnly == 0);
 	}
-	memoryBarrierBuffer();
+	// Only preparation applies commands that other lanes must read.
+	if (kernelPhase == 0) { memoryBarrierBuffer(); }
 	barrier();
-	for (uint round = 0; round < parameters.work && running != 0; round++) {
+	// The host dispatches exactly one round of preparation or reconstruction.
+	if (running != 0) {
 		Stream stream = streams[streamIndex];
 		Affine offset = offsets[lane];
 		Field productX = mul(stream.center.x, offset.x);
@@ -147,8 +151,9 @@ void main() {
 		uint64_t minusWord = canonicalFirstWord(minus);
 		uint plusIndex = 2 * lane;
 		uint minusIndex = plusIndex + 1;
-		if (plusIndex >= stream.cursor && matches(plusWord)) { atomicMin(winner, plusIndex); }
-		if (minusIndex >= stream.cursor && matches(minusWord)) { atomicMin(winner, minusIndex); }
+		bvec2 matched = matchesPair(plusWord, minusWord);
+		if (plusIndex >= stream.cursor && matched.x) { atomicMin(winner, plusIndex); }
+		if (minusIndex >= stream.cursor && matched.y) { atomicMin(winner, minusIndex); }
 		barrier();
 		if (winner / 2 == lane) {
 #ifdef ONINO_DIAGNOSTIC

@@ -32,10 +32,16 @@ Field fold(Field value, uint carry) {
 	// add supplies carry <=1; reduceProduct supplies carry <=38. After
 	// wrapping an adjustment <=1444, the entire value is <=1443.
 	uint64_t adjustment = uint64_t(carry) * 38ul;
-	for (uint index = 0; index < 8; index++) {
-		uint64_t sum = uint64_t(value.limb[index]) + adjustment;
-		value.limb[index] = uint(sum);
-		adjustment = sum >> 32;
+	uint64_t lowSum = uint64_t(value.limb[0]) + adjustment;
+	value.limb[0] = uint(lowSum);
+	adjustment = lowSum >> 32;
+	// Only overflow of the small correction needs the higher limbs.
+	if (adjustment != 0ul) {
+		for (uint index = 1; index < 8; index++) {
+			uint64_t sum = uint64_t(value.limb[index]) + adjustment;
+			value.limb[index] = uint(sum);
+			adjustment = sum >> 32;
+		}
 	}
 	value.limb[0] += uint(adjustment) * 38;
 	return value;
@@ -61,10 +67,15 @@ Field sub(Field first, Field second) {
 	// If the first -38 borrows, its wrapped low limb is >=2^32-38;
 	// the second -38 therefore cannot borrow into the next limb.
 	borrow *= 38;
-	for (uint index = 0; index < 8; index++) {
-		uint64_t difference = uint64_t(result.limb[index]) - borrow;
-		result.limb[index] = uint(difference);
-		borrow = uint(difference >> 63);
+	uint64_t lowDifference = uint64_t(result.limb[0]) - borrow;
+	result.limb[0] = uint(lowDifference);
+	borrow = uint(lowDifference >> 63);
+	if (borrow != 0) {
+		for (uint index = 1; index < 8; index++) {
+			uint64_t difference = uint64_t(result.limb[index]) - borrow;
+			result.limb[index] = uint(difference);
+			borrow = uint(difference >> 63);
+		}
 	}
 	result.limb[0] -= borrow * 38;
 	return result;
