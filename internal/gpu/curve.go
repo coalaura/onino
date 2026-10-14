@@ -68,7 +68,9 @@ func reconstruct(secret [64]byte, steps uint32) (onion.Key, error) {
 }
 
 func makeTable(plan Plan) []uint32 {
-	table := make([]uint32, (pairCount+1)*24+8*4+1)
+	table := make([]uint32, (pairCount+1)*24+8*4+1+(pairCount+1)*8)
+
+	var squares [pairCount + 1]field.Element
 
 	for index := range pairCount + 1 {
 		steps := uint64(index + 1)
@@ -86,13 +88,37 @@ func makeTable(plan Plan) []uint32 {
 
 		coordinates := affine(point, true)
 		copy(table[index*24:], coordinates[:])
+
+		for limb := range 8 {
+			binary.LittleEndian.PutUint32(encoded[limb*4:], coordinates[16+limb])
+		}
+
+		mixed, _ := new(field.Element).SetBytes(encoded[:])
+		squares[index].Square(mixed)
 	}
 
 	for index := range plan.probes {
 		copy(table[(pairCount+1)*24+index*4:], plan.probes[index][:])
 	}
 
-	table[len(table)-1] = plan.count
+	position := (pairCount+1)*24 + 8*4
+	table[position] = plan.count
+	position++
+
+	for index := range pairCount / 2 {
+		var (
+			sum     field.Element
+			product field.Element
+		)
+
+		sum.Add(&squares[2*index], &squares[2*index+1])
+		product.Multiply(&squares[2*index], &squares[2*index+1])
+
+		putLimbs(table[position+index*8:position+(index+1)*8], sum.Bytes())
+		putLimbs(table[position+(pairCount/2+index)*8:position+(pairCount/2+index+1)*8], product.Bytes())
+	}
+
+	putLimbs(table[position+pairCount*8:], squares[pairCount].Bytes())
 
 	return table
 }

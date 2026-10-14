@@ -253,7 +253,7 @@ func (controller *execution) measure(configuration configuration, duration time.
 			elapsed = 0
 		}
 
-		if controller.tail > flightLimit/2 || (sampling && elapsed >= duration) {
+		if controller.backlog > 8 || controller.tail > flightLimit/2 || (sampling && elapsed >= duration) {
 			break
 		}
 	}

@@ -164,7 +164,7 @@ export function inspectKeys(directory, prefixes) {
 }
 
 export async function trial(manifest, config, workload, round, order, directory) {
-	const tool = manifest.tools[config.tool],
+	const tool = manifest.tools[config.artifact || config.tool],
 		prefixes = workload.split("+"),
 		keys = join(directory, "keys");
 
@@ -173,6 +173,8 @@ export async function trial(manifest, config, workload, round, order, directory)
 	const args = invocation(config.tool, config, prefixes, keys, manifest.threads);
 
 	const settings = {
+		experiment: manifest.options.experiment || "",
+		screen: Boolean(manifest.options.screen),
 		warmup_seconds: manifest.options.warmup,
 		measurement_seconds: manifest.options.seconds,
 		rotation: "round/workload cyclic configuration rotation; workloads rotate each round",

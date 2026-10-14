@@ -8,13 +8,14 @@ import { publish, csv } from "./report.mjs";
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const options = { runs: 5, warmup: 15, seconds: 20, resume: "", onino: "", baseline: "", replace: "" },
+const options = { runs: 5, warmup: 15, seconds: 20, resume: "", onino: "", baseline: "", replace: "", only: "", compare: "", workloads: "", experiment: "", screen: 0 },
 	args = process.argv.slice(2);
 
 for (let index = 0; index < args.length; index++) {
 	const name = args[index].replace(/^--/, "");
 
 	if (name === "help") {
+		console.log("Local experiments: --only onino-gpu,onino-combined,onino-cpu [--compare BASELINE_PATH] [--experiment E01] [--workloads somethingrare,hello,privacy,donate+mirror+secure]. Subsets write samples.csv only within their measurements/ suite; the public CSV and charts contain main comparisons only. --screen 1 permits short rejection screens (not confirmation results).");
 		console.log("bun bench/run.mjs [--onino PATH] [--runs 5] [--warmup 15] [--seconds 20] [--resume measurements/bench-ID] [--baseline measurements/bench-ID --replace CONFIGURATION]\nRequires manually downloaded official mkp224o, Onionloom and Prefix32 executables under bin/. Builds onino with builder (PACE, CGO, gpu); --onino supplies an existing build instead. Runs all modes and workloads, validates counters/modes/saved files, and updates .github/benchmarks.csv, comparison SVGs and README. Logs and saved keys stay under ignored measurements/. Resume continues a stopped suite without rerunning completed attempts. Baseline/replace reruns one configuration in a new suite and retains all other baseline samples verbatim.");
 
 		process.exit(0);
@@ -27,8 +28,16 @@ for (let index = 0; index < args.length; index++) {
 	options[name] = typeof options[name] === "number" ? Number(args[++index]) : args[++index];
 }
 
-if (!Number.isInteger(options.runs) || options.runs < 5 || !Number.isFinite(options.warmup) || options.warmup < 15 || !Number.isFinite(options.seconds) || options.seconds < 20) {
+if (![0, 1].includes(options.screen) || !Number.isInteger(options.runs) || options.runs < (options.screen ? 1 : 5) || !Number.isFinite(options.warmup) || options.warmup < (options.screen ? 5 : 15) || !Number.isFinite(options.seconds) || options.seconds < (options.screen ? 5 : 20)) {
 	throw new Error("Require at least five runs, 15 seconds warmup and 20 seconds target measurement.");
+}
+
+if ((options.compare || options.workloads || options.experiment || options.screen) && !options.only || options.only && (options.baseline || options.replace)) {
+	throw new Error("Local experiment options require --only and cannot use --baseline/--replace.");
+}
+
+if (options.only && options.only.split(",").some(name => !["onino-cpu", "onino-gpu", "onino-combined"].includes(name))) {
+	throw new Error("--only accepts onino-cpu,onino-gpu,onino-combined.");
 }
 
 if (Boolean(options.baseline) !== Boolean(options.replace) || (options.resume && options.baseline)) {
@@ -59,7 +68,7 @@ if (options.resume) {
 	writeFileSync(manifestPath, JSON.stringify(manifest, null, "\t"));
 }
 
-const configurations = [
+let configurations = [
 	{ id: "mkp224o-cpu", tool: "mkp224o", mode: "CPU", workers: manifest.threads },
 	{ id: "onionloom-cpu", tool: "onionloom", mode: "CPU", workers: manifest.threads },
 	{ id: "onionloom-gpu", tool: "onionloom", mode: "GPU-assisted + 1 CPU search worker", workers: 1 },
@@ -71,8 +80,20 @@ const configurations = [
 	{ id: "prefix32-gpu", tool: "prefix32", mode: "GPU-accelerated (CPU assistance; no CPU search)", workers: 0 }
 ];
 
-const workloads = ["somethingrare", "hello", "privacy", "donate+mirror+secure"],
+if (manifest.options.only) {
+	configurations = configurations.filter(config => manifest.options.only.split(",").includes(config.id));
+
+	if (manifest.options.compare) {
+		configurations = configurations.flatMap(config => [{ ...config, id: `baseline-${config.id}`, artifact: "reference" }, { ...config, id: `${manifest.options.experiment || "candidate"}-${config.id}` }]);
+	}
+}
+
+const workloads = manifest.options.workloads ? manifest.options.workloads.split(",") : ["somethingrare", "hello", "privacy", "donate+mirror+secure"],
 	rows = [];
+
+if (workloads.some(workload => !/^[a-z2-7]{1,51}(\+[a-z2-7]{1,51}){0,7}$/.test(workload))) {
+	throw new Error("Invalid anchored-prefix workload.");
+}
 
 let baseline;
 
@@ -164,6 +185,10 @@ for (const tool of Object.values(manifest.tools)) {
 	}
 }
 
-publish(root, rows, manifest, configurations, workloads);
+if (manifest.options.only) {
+	console.log(`Recorded ${rows.length} local ${manifest.options.screen ? "screen" : "confirmation"} attempts in ${join(directory, "samples.csv")}.`);
+} else {
+	publish(root, rows, manifest, configurations, workloads);
 
-console.log(`Published ${rows.length} attempts to .github/benchmarks.csv. Full transcripts and keys: ${directory}`);
+	console.log(`Published ${rows.length} attempts to .github/benchmarks.csv. Full transcripts and keys: ${directory}`);
+}

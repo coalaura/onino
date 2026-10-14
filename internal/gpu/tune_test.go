@@ -90,6 +90,35 @@ func TestTuningOverridesAndDeadline(t *testing.T) {
 	}
 }
 
+func TestTuningStopsAtSaverBackpressure(t *testing.T) {
+	stages := []int{1, 3}
+
+	for _, stage := range stages {
+		fixture := tuningFixture{now: time.Unix(0, 0)}
+
+		tuner := fixture.tuner(Options{AutoStreams: true, AutoRounds: true})
+
+		tuner.measure = func(config configuration, duration time.Duration) (observation, error) {
+			result, err := fixture.measure(config, duration)
+
+			if len(fixture.calls) >= stage {
+				result.backlog = 9
+			}
+
+			return result, err
+		}
+
+		selected, err := tuner.selectInitial()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(fixture.calls) != stage || selected.configuration.streams > fixture.calls[stage-1].streams {
+			t.Fatalf("continued tuning through saver backpressure: calls=%v selected=%+v", fixture.calls, selected)
+		}
+	}
+}
+
 func TestTuningNoiseAndResponsiveness(t *testing.T) {
 	incumbent := observation{configuration: configuration{streams: 8192, rounds: 4}, rate: 100, tail: 10 * time.Millisecond}
 	candidate := observation{configuration: configuration{streams: 16384, rounds: 4}, rate: 102, tail: 20 * time.Millisecond}

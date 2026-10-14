@@ -42,6 +42,15 @@ void main() {
 			}
 			result = canonical(result);
 			break;
+		case 14: result = canonical(denominatorPair(square(command.first), command.second, command.unused)); break;
+		case 15:
+			uint64_t provisional = provisionalProductWord(command.first, command.second);
+			result = small(0);
+			result.limb[0] = uint(provisional);
+			result.limb[1] = uint(provisional >> 32);
+			break;
+		case 16: result = canonical(squareComplement(command.first)); break;
+		case 17: result = canonical(inverse(command.first)); break;
 		default: result = inverse(command.first); break;
 	}
 	if (command.operation >= 8) {

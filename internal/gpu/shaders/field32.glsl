@@ -109,7 +109,17 @@ Field mul(Field first, Field second) {
 	}
 	return reduceProduct(product);
 }
-Field square(Field value) {
+Field reduceComplement(uint product[16]) {
+	Field result = small(0);
+	int64_t carry = 1l;
+	for (uint index = 0; index < 8; index++) {
+		int64_t difference = carry - int64_t(product[index]) - 38l * int64_t(product[index + 8]);
+		result.limb[index] = uint(difference);
+		carry = difference >> 32;
+	}
+	return sub(result, small(uint(-carry) * 38));
+}
+Field squareCore(Field value, bool complement) {
 	uint product[16];
 	for (uint index = 0; index < 16; index++) { product[index] = 0; }
 	for (uint left = 0; left < 7; left++) {
@@ -130,8 +140,11 @@ Field square(Field value) {
 		product[2 * index + 1] = uint(sum);
 		carry = sum >> 32;
 	}
+	if (complement) { return reduceComplement(product); }
 	return reduceProduct(product);
 }
+Field square(Field value) { return squareCore(value, false); }
+Field squareComplement(Field value) { return squareCore(value, true); }
 Field canonical(Field value) {
 	// A 256-bit representation may be >=2p (the final 38 integers), so two
 	// conditional subtractions are required, including an outgoing 256th carry.

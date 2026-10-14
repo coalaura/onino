@@ -20,22 +20,24 @@ Omitted `--gpu-streams` and `--gpu-rounds` values are calibrated with the reques
 
 ## Shader generation
 
-The checked-in shaders were generated with glslc and SPIRV-Tools from Vulkan SDK 1.4.328.1. Run these commands from the repository root, with those tools on PATH:
+The checked-in shaders were generated with glslang 16.0.0 and SPIRV-Tools from Vulkan SDK 1.4.328.1. The optimized glslang generation route was selected by the E10 comparison; it adds no runtime dependency. Run these commands from the repository root, with those tools on PATH:
 
 ```sh
-glslc --target-env=vulkan1.3 -O internal/gpu/shaders/search.comp -o internal/gpu/shaders/search.spv
+glslang -V --target-env vulkan1.3 -Os internal/gpu/shaders/search.comp -o internal/gpu/shaders/search.spv
 spirv-val --target-env vulkan1.3 internal/gpu/shaders/search.spv
-glslc --target-env=vulkan1.3 -O internal/gpu/shaders/arithmetic.comp -o internal/gpu/shaders/arithmetic.spv
+glslang -V --target-env vulkan1.3 -Os internal/gpu/shaders/arithmetic.comp -o internal/gpu/shaders/arithmetic.spv
 spirv-val --target-env vulkan1.3 internal/gpu/shaders/arithmetic.spv
-glslc --target-env=vulkan1.3 -O -DONINO_DIAGNOSTIC=1 internal/gpu/shaders/search.comp -o internal/gpu/shaders/diagnostic.spv
+glslang -V --target-env vulkan1.3 -Os -DONINO_DIAGNOSTIC=1 internal/gpu/shaders/search.comp -o internal/gpu/shaders/diagnostic.spv
 spirv-val --target-env vulkan1.3 internal/gpu/shaders/diagnostic.spv
-glslc --target-env=vulkan1.3 -O -DONINO_INITIAL_STEPS=4294967167u internal/gpu/shaders/search.comp -o internal/gpu/shaders/epoch.spv
+glslang -V --target-env vulkan1.3 -Os -DONINO_INITIAL_STEPS=4294967167u internal/gpu/shaders/search.comp -o internal/gpu/shaders/epoch.spv
 spirv-val --target-env vulkan1.3 internal/gpu/shaders/epoch.spv
 ```
 
 The arithmetic, full-encoding and epoch-boundary diagnostic shaders are embedded only in correctness tests. The epoch variant changes the initial step counter to exercise exhaustion without traversing billions of candidates. Source edits require regenerating and validating the affected SPIR-V before testing. There is deliberately no automatic SDK download or shader compilation during normal builds.
 
 Search specialization constant 0 selects preparation (0), inversion (1) or reconstruction (2); constant 1 selects local size 128, 64 or 128 respectively. All three pipelines use the same embedded module. Preparation and reconstruction each execute one round per dispatch; the bridge supplies the inter-dispatch Vulkan memory dependencies. The 128 pairs per stream are distinct from the runtime stream count and rounds per submission. Explicit stream counts up to 32,768 are allowed subject to device and submission limits; automatic allocation remains capped at 16,384. Regenerate all four modules after changing shared field arithmetic.
+
+Preparation uses precomputed quadratic denominator pairs and stops at four frontier products. Packed inversion combines and expands that frontier with a 600-step, 30-step-batched modular inverse. Reconstruction uses a conservative two-word prefix test only when every probe has at least twelve constrained bits; survivors always receive exact field multiplication and canonical matching. These choices do not change candidate enumeration or CPU responsibilities. Calibration stops exploring when durable-save backpressure prevents a useful GPU-capacity measurement.
 
 ## Device correctness checks
 

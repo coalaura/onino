@@ -10,6 +10,7 @@
 #endif
 
 const uint pairCount = 128;
+const uint frontierCount = 4;
 const uint prepareFirst = 0;
 const uint reconstructLast = 4;
 
@@ -22,7 +23,7 @@ struct Command { Affine center; uint expected; uint generation; uint action; };
 struct Probe { uint lowMask; uint highMask; uint lowValue; uint highValue; };
 struct Hit { uint stream; uint generation; uint steps; uint kind; uint low; uint high; };
 layout(std430, binding = 0) buffer Streams { Stream streams[]; };
-layout(std430, binding = 1) readonly buffer Tables { Affine offsets[pairCount + 1]; Probe probes[8]; uint probeCount; };
+layout(std430, binding = 1) readonly buffer Tables { Affine offsets[pairCount + 1]; Probe probes[8]; uint probeCount; Field pairSums[pairCount / 2]; Field pairProducts[pairCount / 2]; Field jumpSquare; };
 layout(std430, binding = 2) buffer Commands { Command commands[]; };
 layout(std430, binding = 3) buffer Results { uint count; uint checked; uint pending; uint reserved; Hit hits[]; };
 layout(push_constant) uniform Parameters { uint work; uint capacity; uint collectOnly; uint phase; } parameters;
@@ -67,10 +68,20 @@ void main() {
 	if (kernelPhase == 1) {
 		uint index = gl_GlobalInvocationID.x;
 		if (index >= parameters.work || streams[index].status != 0 || parameters.collectOnly != 0) { return; }
-		Field root = readNode(index, 1);
+		Field frontier[2 * frontierCount];
+		for (uint node = frontierCount; node < 2 * frontierCount; node++) { frontier[node] = readNode(index, node); }
+		for (uint node = frontierCount - 1; node > 0; node--) { frontier[node] = mul(frontier[2 * node], frontier[2 * node + 1]); }
+		Field root = frontier[1];
 		Field jump = readNode(index, 0);
 		Field combined = inverse(mul(root, jump));
-		writeNode(index, 1, mul(jump, combined));
+		frontier[1] = mul(jump, combined);
+		for (uint node = 1; node < frontierCount; node++) {
+			Field left = mul(frontier[node], frontier[2 * node + 1]);
+			Field right = mul(frontier[node], frontier[2 * node]);
+			frontier[2 * node] = left;
+			frontier[2 * node + 1] = right;
+		}
+		for (uint node = frontierCount; node < 2 * frontierCount; node++) { writeNode(index, node, frontier[node]); }
 		Field reciprocalJump = mul(root, combined);
 		Affine center = streams[index].center;
 		Affine offset = offsets[pairCount];
@@ -116,25 +127,29 @@ void main() {
 		Field productY = mul(stream.center.y, offset.y);
 		Field mixed = mul(stream.center.xy, offset.xy);
 		if (kernelPhase == 0) {
-			products[pairCount + lane] = sub(small(1), square(mixed));
+			if (lane == 0) { products[0] = square(stream.center.xy); }
 			barrier();
-			for (uint size = pairCount / 2; size > 0; size >>= 1) {
+			Field centerSquare = products[0];
+			if (lane < pairCount / 2) {
+				products[pairCount / 2 + lane] = denominatorPair(centerSquare, pairSums[lane], pairProducts[lane]);
+			}
+			barrier();
+			for (uint size = pairCount / 4; size >= frontierCount; size >>= 1) {
 				if (lane < size) { products[size + lane] = mul(products[2 * (size + lane)], products[2 * (size + lane) + 1]); }
 				barrier();
 			}
 			if (lane == 0) {
-				Field mixedJump = mul(stream.center.xy, offsets[pairCount].xy);
-				products[0] = sub(small(1), square(mixedJump));
+				products[0] = sub(small(1), mul(centerSquare, jumpSquare));
 			}
 			barrier();
-			writeNode(streamIndex, lane, products[lane]);
+			if (lane == 0 || lane >= frontierCount) { writeNode(streamIndex, lane, products[lane]); }
 			return;
 		}
 		products[lane] = readNode(streamIndex, lane);
-		products[pairCount + lane] = sub(small(1), square(mixed));
+		products[pairCount + lane] = squareComplement(mixed);
 		if (lane == 0) { winner = 2 * pairCount; }
 		barrier();
-		for (uint size = 1; size < pairCount; size <<= 1) {
+		for (uint size = frontierCount; size < pairCount; size <<= 1) {
 			Field child;
 			uint node = 2 * size + lane;
 			if (lane < 2 * size) { child = mul(products[node / 2], products[node ^ 1]); }
@@ -145,13 +160,31 @@ void main() {
 		}
 		Field reciprocal = products[pairCount + lane];
 		Field factor = mul(mixed, reciprocal);
-		Field plus = mul(add(productY, productX), add(reciprocal, factor));
-		Field minus = mul(sub(productY, productX), sub(reciprocal, factor));
+		Field plusNumerator = add(productY, productX);
+		Field minusNumerator = sub(productY, productX);
+		Field plusReciprocal = add(reciprocal, factor);
+		Field minusReciprocal = sub(reciprocal, factor);
+		bool selective = true;
+		for (uint index = 0; index < probeCount; index++) {
+			selective = selective && bitCount(probes[index].lowMask) + bitCount(probes[index].highMask) >= 12;
+		}
+		bool possible = true;
+		if (selective) {
+			uint64_t provisionalPlus = provisionalProductWord(plusNumerator, plusReciprocal);
+			uint64_t provisionalMinus = provisionalProductWord(minusNumerator, minusReciprocal);
+			possible = any(matchesPair(provisionalPlus, provisionalMinus)) || any(matchesPair(provisionalPlus + 19ul, provisionalMinus + 19ul));
+		}
+		Field plus = small(0);
+		Field minus = small(0);
+		if (possible) {
+			plus = mul(plusNumerator, plusReciprocal);
+			minus = mul(minusNumerator, minusReciprocal);
+		}
 		uint64_t plusWord = canonicalFirstWord(plus);
 		uint64_t minusWord = canonicalFirstWord(minus);
 		uint plusIndex = 2 * lane;
 		uint minusIndex = plusIndex + 1;
-		bvec2 matched = matchesPair(plusWord, minusWord);
+		bvec2 matched = possible ? matchesPair(plusWord, minusWord) : bvec2(false);
 		if (plusIndex >= stream.cursor && matched.x) { atomicMin(winner, plusIndex); }
 		if (minusIndex >= stream.cursor && matched.y) { atomicMin(winner, minusIndex); }
 		barrier();

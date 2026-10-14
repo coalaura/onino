@@ -37,7 +37,7 @@ export function collect(root, directory, options, threads) {
 		suffix = windows ? ".exe" : "",
 		binaries = files(join(root, "bin")),
 		tools = {},
-		names = ["mkp224o", "onionloom", "prefix32"];
+		names = options.only ? [] : ["mkp224o", "onionloom", "prefix32"];
 
 	for (const name of names) {
 		const matches = binaries.filter(path => name === "prefix32" ? /^prefix32(?:-.+)?(?:\.exe)?$/.test(basename(path)) && !/\.(txt|zip|gz|md)$/.test(path) : basename(path) === `${name}${suffix}`);
@@ -97,6 +97,18 @@ export function collect(root, directory, options, threads) {
 		source_sha256: options.onino ? "unknown (user-supplied binary)" : sourceHash.digest("hex"),
 		source_changes: options.onino ? [] : changes.map(path => ({ path: path, sha256: existsSync(join(root, path)) ? hash(join(root, path)) : "deleted" }))
 	};
+
+	if (options.compare) {
+		const reference = resolve(root, options.compare);
+
+		tools.reference = {
+			path: reference,
+			sha256: hash(reference),
+			version: "preserved local Onino baseline; see embedded build information",
+			build: command("go", ["version", "-m", reference], root),
+			build_command: "User-supplied baseline; see research build record"
+		};
+	}
 
 	const platform = { platform: process.platform, release: os.release(), architecture: os.arch(), cpu: os.cpus()[0]?.model, logical_cpus: os.cpus().length, available_threads: threads, memory_bytes: os.totalmem() };
 

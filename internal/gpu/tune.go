@@ -114,6 +114,12 @@ func (tuner *calibration) selectInitial() (observation, error) {
 		return incumbent, nil
 	}
 
+	// A validated trial that fills the saver queue cannot measure GPU capacity.
+	// Further trials would spend the startup budget waiting for durable saves.
+	if incumbent.backlog > 8 {
+		return incumbent, nil
+	}
+
 	fallback := incumbent
 
 	// Independent streams are explored before rounds. One-round tails bound growth even
@@ -137,9 +143,13 @@ func (tuner *calibration) selectInitial() (observation, error) {
 			fallback = candidate
 		}
 
-		if candidate.backlog > next.streams/4 || tuner.acceptance*float64(next.streams*2*pairCount) > 256 {
+		if candidate.backlog > 8 || tuner.acceptance*float64(next.streams*2*pairCount) > 256 {
 			break
 		}
+	}
+
+	if incumbent.backlog > 8 {
+		return fallback, nil
 	}
 
 	anchor := incumbent
