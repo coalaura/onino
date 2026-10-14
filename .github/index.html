@@ -1392,7 +1392,57 @@
 							<span>Sustained somethingrare search · million candidates/s</span>
 							<span>Median and min–max</span>
 						</figcaption>
-						<img src="prefix-comparison.svg" width="1100" height="650" alt="All nine CPU and GPU configurations on the same sustained somethingrare workload; median bars and min–max whiskers." style="width:100%;height:auto">
+						<svg id="benchmark-chart" style="display:block;width:100%;height:auto" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 650" role="img" aria-labelledby="benchmark-chart-title benchmark-chart-desc">
+							<title id="benchmark-chart-title">Sustained somethingrare throughput</title>
+							<desc id="benchmark-chart-desc">5 runs per configuration; median bars and min-max whiskers. Million candidates per second, zero-based scale. GPU execution models differ as labeled.</desc>
+							<g font-family="Segoe UI,Arial,sans-serif" fill="#f3eedf">
+								<text x="30" y="40" font-size="24" font-weight="700">somethingrare · sustained search</text>
+								<text x="30" y="67" font-size="14" fill="#b7afc3">AMD Ryzen 9 9950X3D 16-Core Processor · 32 available CPU threads</text>
+								<text x="30" y="90" font-size="14" fill="#b7afc3">NVIDIA GeForce RTX 5090 · driver 617.42</text>
+								<path d="M340 120V565" stroke="#b7afc3" opacity="0.18" /><text x="340" y="590" text-anchor="middle" font-size="13" fill="#b7afc3">0.0</text>
+								<path d="M477.5 120V565" stroke="#b7afc3" opacity="0.18" /><text x="477.5" y="590" text-anchor="middle" font-size="13" fill="#b7afc3">3,000.0</text>
+								<path d="M615 120V565" stroke="#b7afc3" opacity="0.18" /><text x="615" y="590" text-anchor="middle" font-size="13" fill="#b7afc3">6,000.0</text>
+								<path d="M752.5 120V565" stroke="#b7afc3" opacity="0.18" /><text x="752.5" y="590" text-anchor="middle" font-size="13" fill="#b7afc3">9,000.0</text>
+								<path d="M890 120V565" stroke="#b7afc3" opacity="0.18" /><text x="890" y="590" text-anchor="middle" font-size="13" fill="#b7afc3">12,000.0</text>
+								<text x="30" y="143" font-size="16">mkp224o CPU</text>
+								<rect x="340" y="124" width="5.866137063015572" height="27" rx="3" fill="#b18ad5" />
+								<path d="M345.8244607551847 138H345.87538265817193M345.8244607551847 131V145M345.87538265817193 131V145" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="143" text-anchor="end" font-size="16">128.0</text>
+								<text x="30" y="190" font-size="16">Onionloom CPU</text>
+								<rect x="340" y="171" width="15.419287864744243" height="27" rx="3" fill="#b18ad5" />
+								<path d="M355.264279423569 185H355.4823355196557M355.264279423569 178V192M355.4823355196557 178V192" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="190" text-anchor="end" font-size="16">336.4</text>
+								<text x="30" y="237" font-size="16">Onionloom GPU + 1 CPU worker</text>
+								<rect x="340" y="218" width="5.969029610975594" height="27" rx="3" fill="#b18ad5" />
+								<path d="M345.51750281711986 232H345.96950581809995M345.51750281711986 225V239M345.96950581809995 225V239" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="237" text-anchor="end" font-size="16">130.2</text>
+								<text x="30" y="284" font-size="16">Onionloom CPU+GPU</text>
+								<rect x="340" y="265" width="18.21664103389709" height="27" rx="3" fill="#b18ad5" />
+								<path d="M358.1581127582683 279H358.4232665322215M358.1581127582683 272V286M358.4232665322215 272V286" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="284" text-anchor="end" font-size="16">397.5</text>
+								<text x="30" y="331" font-size="16">Onino CPU</text>
+								<rect x="340" y="312" width="59.33407110679386" height="27" rx="3" fill="#b18ad5" />
+								<path d="M396.80933797792085 326H399.57144108654927M396.80933797792085 319V333M399.57144108654927 319V333" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="331" text-anchor="end" font-size="16">1,294.6</text>
+								<text x="30" y="378" font-size="16">Onino GPU-only</text>
+								<rect x="340" y="359" width="437.7134414491951" height="27" rx="3" fill="#b18ad5" />
+								<path d="M775.415044745625 373H780.0049280551943M775.415044745625 366V380M780.0049280551943 366V380" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="378" text-anchor="end" font-size="16">9,550.1</text>
+								<text x="30" y="425" font-size="16">Onino CPU+GPU</text>
+								<rect x="340" y="406" width="483.23498517543305" height="27" rx="3" fill="#b18ad5" />
+								<path d="M779.9683486769961 420H835.218653892253M779.9683486769961 413V427M835.218653892253 413V427" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="425" text-anchor="end" font-size="16">10,543.3</text>
+								<text x="30" y="472" font-size="16">Prefix32 CPU</text>
+								<rect x="340" y="453" width="21.162904838429323" height="27" rx="3" fill="#b18ad5" />
+								<path d="M360.884936660687 467H361.3134493795346M360.884936660687 460V474M361.3134493795346 460V474" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="472" text-anchor="end" font-size="16">461.7</text>
+								<text x="30" y="519" font-size="16">Prefix32 GPU-accelerated</text>
+								<rect x="340" y="500" width="468.42485093108826" height="27" rx="3" fill="#b18ad5" />
+								<path d="M806.982213431427 514H809.787977462729M806.982213431427 507V521M809.787977462729 507V521" stroke="#f3eedf" stroke-width="2" />
+								<text x="1060" y="519" text-anchor="end" font-size="16">10,220.2</text>
+								<text x="30" y="624" font-size="14" fill="#b7afc3">M candidates/s · median and min–max · 5 runs · ≥15s search warmup · ~20s windows</text>
+							</g>
+						</svg>
 					</figure>
 					<details class="benchmark-details">
 						<summary>Measurements and test conditions</summary>

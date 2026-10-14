@@ -88,6 +88,18 @@ export function publish(root, rows, manifest, configurations, workloads) {
 		writeFileSync(join(root, ".github", `prefix-comparison${light ? "-light" : ""}.svg`), svg(series, manifest, graphics, light));
 	}
 
+	const page = join(root, ".github", "index.html"),
+		html = readFileSync(page, "utf8"),
+		chart = /^(\t*)<svg id="benchmark-chart"[\s\S]*?<\/svg>/m;
+
+	if (!chart.test(html)) {
+		throw new Error("Embedded benchmark chart missing from index.html");
+	}
+
+	const embedded = svg(series, manifest, graphics, false).trimEnd().replace("<svg ", '<svg id="benchmark-chart" style="display:block;width:100%;height:auto" ').replace('aria-labelledby="title desc"', 'aria-labelledby="benchmark-chart-title benchmark-chart-desc"').replace('id="title"', 'id="benchmark-chart-title"').replace('id="desc"', 'id="benchmark-chart-desc"');
+
+	writeFileSync(page, html.replace(chart, (match, indent) => embedded.split("\n").map(line => `${indent}${line}`).join("\n")));
+
 	const table = configurations.map((config, index) => {
 		const cells = workloads.map(workload => {
 			const stats = summary(rows, config.id, workload, manifest.options.runs),
