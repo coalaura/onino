@@ -33,8 +33,7 @@ function escape(value) {
 }
 
 function svg(series, manifest, graphics, light) {
-	const background = light ? "#faf9f6" : "#151418",
-		foreground = light ? "#27242d" : "#f3eedf",
+	const foreground = light ? "#27242d" : "#f3eedf",
 		muted = light ? "#645e70" : "#b7afc3";
 
 	const maximum = Math.max(1, ...series.map(item => item.stats?.max ?? 0)),
@@ -46,7 +45,6 @@ function svg(series, manifest, graphics, light) {
 		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 650" role="img" aria-labelledby="title desc">`,
 		`<title id="title">Sustained somethingrare throughput</title>`,
 		`<desc id="desc">${manifest.options.runs} runs per configuration; median bars and min-max whiskers. Million candidates per second, zero-based scale. GPU execution models differ as labeled.</desc>`,
-		`<rect width="1100" height="650" rx="12" fill="${background}"/>`,
 		`<g font-family="Segoe UI,Arial,sans-serif" fill="${foreground}">`,
 		`<text x="30" y="40" font-size="24" font-weight="700">somethingrare · sustained search</text>`,
 		`<text x="30" y="67" font-size="14" fill="${muted}">${escape(manifest.hardware.cpu.trim())} · ${manifest.threads} available CPU threads</text>`,
