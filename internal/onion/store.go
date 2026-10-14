@@ -51,7 +51,7 @@ func (store *Store) Save(key Key) error {
 		return fmt.Errorf("save match in %s: %w", staging, err)
 	}
 
-	err = os.Rename(staging, destination)
+	err = publishMatch(staging, destination)
 	if err != nil {
 		return fmt.Errorf("publish match from %s: %w", staging, err)
 	}
