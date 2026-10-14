@@ -917,3 +917,24 @@ Sources were used according to their scope:
 | [Vulkan recycling sample](https://docs.vulkan.org/samples/latest/samples/performance/command_buffer_usage/README.html) and [pool-reset requirements](https://docs.vulkan.org/refpages/latest/refpages/source/vkResetCommandPool.html) | Official guidance 9/10 and normative API requirements 10/10; legal ownership is required independently of observed speed |
 
 The practical limits established here are reconstruction's dominant measured phase, substantial all-core persistence contention, variable automatic frequent-match behavior and unresolved native-call stalls. Arithmetic and filtering improve this host's rare complete-search throughput with very low warmed orchestration cost, but these measurements neither prove a universal optimum nor predict performance on untested devices.
+
+## 13. Autotuning stability and targeted benchmark rerun, 2026-10-14
+
+The comparison suite's five Onino CPU+GPU `somethingrare` samples ranged from 9,599.3 to 10,804.8 M/s. Short 300 ms trials included command-recording, pipeline-fill and drainage costs. The finalist comparison also widened its throughput indifference band using the difference between two repeat samples, allowing transient scheduling variation to classify a meaningful speed difference as a tie and favor the shorter submission.
+
+Timed performance trials now settle for 100 ms before scoring a 300 ms pipelined interval. Transition/drainage work remains accounted useful search, but is excluded from that interval's rate. When the startup budget permits, finalists receive three interleaved samples each and are compared by median with a fixed 1% indifference band. Longer bounded submissions are explored first; reserving repeat time begins after two distinct finalists exist, so cold initialization cannot consume the remaining exploration budget on short submissions alone. Explicit overrides, submission/flight limits, independent verification and normal saving remain in effect.
+
+The targeted rerun is `measurements/bench-2026-10-14T10-49-58-867Z`, built from `b45cdaa99f848732da0be33e3f8950350d49b26b` plus the recorded working-tree changes. It replaces only the 20 Onino CPU+GPU attempts from `measurements/bench-2026-10-14T04-31-54-935Z`; all 160 other sample records are identical. Each workload has five attempts, at least 15 seconds of post-setup search warmup, approximately 20-second counter-delta windows and normal key saving. The manifest and CSV retain binary/source hashes and per-sample provenance.
+
+| CPU+GPU `somethingrare`, M/s | Before | After |
+|---|---:|---:|
+| Minimum | 9,599.3 | 10,753.5 |
+| Median | 10,543.3 | 10,945.0 |
+| Maximum | 10,804.8 | 10,994.3 |
+| Min-max width | 1,205.5 | 240.7 |
+
+Median throughput increased 3.8% and the observed min-max width decreased 80.0%. The five selected round counts were 32, 22, 31, 44 and 44, all with 16,384 streams: stable throughput does not require an identical winning configuration. These are sequential same-machine measurements, not a cross-device guarantee.
+
+The remaining workloads expose limits rather than universal stability. `hello` ranged from 1,100.2 to 2,504.2 M/s; the multi-prefix workload ranged from 1,840.6 to 10,908.3 M/s. Its first two attempts selected one round and had approximately 8.4/8.6-second median discovery-to-saved-log delays, versus approximately 0.04-0.05 seconds in the three later fast attempts. This demonstrates substantial save-path queueing during the slow runs; it does not identify the underlying filesystem or scheduling cause. All slow samples are retained. One `privacy` attempt remained in tuning until the runner's 600-second startup timeout, with CPU search continuing. Its exact blocking operation was not captured, so it is not attributed to a particular native call. The table reports `privacy` as incomplete (4/5), without substituting a retry or selectively averaging survivors. A runner-timeout-interrupted rare-prefix attempt was archived before resuming the suite.
+
+Regression tests cover scheduling outliers and cold-start candidate ordering. All 28 GPU-package tests passed with Vulkan synchronization validation; targeted GPU-package vet checks passed for Windows, Linux and macOS. The repository-wide vet invocation timed out and is not reported as passing. The tuning correction improves the primary comparison's measured consistency; saving contention and startup stalls remain unresolved limitations.

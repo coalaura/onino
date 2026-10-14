@@ -4,7 +4,6 @@ package gpu
 
 import (
 	"errors"
-	"math"
 	"slices"
 	"time"
 )
@@ -14,6 +13,8 @@ const (
 	submissionLimit   = 150 * time.Millisecond
 	flightLimit       = 120 * time.Millisecond
 	trialDuration     = 300 * time.Millisecond
+	settleDuration    = 100 * time.Millisecond
+	finalistBudget    = 6 * (settleDuration + trialDuration + flightLimit)
 	tuningNoise       = 0.01
 	transitionReserve = 500 * time.Millisecond
 )
@@ -143,7 +144,7 @@ func (tuner *calibration) selectInitial() (observation, error) {
 
 	anchor := incumbent
 
-	if !tuner.room(trialDuration) {
+	if !tuner.room(settleDuration + trialDuration + flightLimit) {
 		return fallback, nil
 	}
 
@@ -158,7 +159,13 @@ func (tuner *calibration) selectInitial() (observation, error) {
 	runner := incumbent
 
 	for _, next := range candidates {
-		if !tuner.room(4*trialDuration + 100*time.Millisecond) {
+		required := settleDuration + trialDuration + flightLimit
+
+		if best.configuration != runner.configuration {
+			required += finalistBudget
+		}
+
+		if !tuner.room(required) {
 			break
 		}
 
@@ -179,36 +186,52 @@ func (tuner *calibration) selectInitial() (observation, error) {
 		}
 	}
 
-	if best.configuration == runner.configuration || !tuner.room(3*trialDuration) {
+	if best.configuration == runner.configuration || !tuner.room(finalistBudget) {
 		return best, nil
 	}
 
-	// Return to the runner, repeat the winner, then return again. A time trend or a
-	// noisy combined CPU sample raises the required improvement instead of winning a tie.
-	before, err := tuner.measure(runner.configuration, trialDuration)
-	if err != nil {
-		return best, err
+	// Interleave three samples per finalist so one scheduling stall cannot choose
+	// the winner. Variability is not evidence that a real throughput gap is a tie.
+	order := [...]bool{false, true, true, false, true, false}
+
+	var (
+		bestRates   [3]float64
+		runnerRates [3]float64
+		bestCount   int
+		runnerCount int
+	)
+
+	for _, winner := range order {
+		next := runner.configuration
+
+		if winner {
+			next = best.configuration
+		}
+
+		repeated, measureError := tuner.measure(next, trialDuration)
+		if measureError != nil {
+			return best, measureError
+		}
+
+		if winner {
+			bestRates[bestCount] = repeated.rate
+			bestCount++
+			best.tail = max(best.tail, repeated.tail)
+		} else {
+			runnerRates[runnerCount] = repeated.rate
+			runnerCount++
+
+			runner.tail = max(runner.tail, repeated.tail)
+		}
 	}
 
-	repeated, err := tuner.measure(best.configuration, trialDuration)
-	if err != nil {
-		return best, err
-	}
+	slices.Sort(bestRates[:])
+	slices.Sort(runnerRates[:])
 
-	after, err := tuner.measure(runner.configuration, trialDuration)
-	if err != nil {
-		return best, err
-	}
+	best.rate = bestRates[1]
+	runner.rate = runnerRates[1]
 
-	noise := math.Abs(before.rate-after.rate) / max(before.rate, after.rate, 1)
-
-	runner.rate = (before.rate + after.rate) / 2
-	runner.tail = max(before.tail, after.tail)
-
-	best.rate = repeated.rate
-	best.tail = max(best.tail, repeated.tail)
-
-	if better(best, runner, max(tuningNoise, noise)) {
+	if better(best, runner, tuningNoise) {
 		return best, nil
 	}
 
@@ -222,16 +245,19 @@ func tuningCandidates(anchor observation, options Options, acceptance float64) [
 	rounds := anchor.configuration.rounds
 
 	if options.AutoRounds {
-		targets := [...]time.Duration{2 * time.Millisecond, 5 * time.Millisecond, 10 * time.Millisecond, 20 * time.Millisecond}
+		// Try the longest bounded submission first so a cold startup cannot spend
+		// the remaining budget only on host-overhead-dominated short submissions.
+		targets := [...]time.Duration{20 * time.Millisecond, 10 * time.Millisecond, 5 * time.Millisecond, 2 * time.Millisecond}
 
 		for _, target := range targets {
-			rounds = max(1, min(MaxRounds, int(float64(target)*float64(anchor.configuration.rounds)/float64(max(anchor.tail, time.Microsecond)))))
+			candidateRounds := max(1, min(MaxRounds, int(float64(target)*float64(anchor.configuration.rounds)/float64(max(anchor.tail, time.Microsecond)))))
 
 			if acceptance*(2*pairCount) > 0.05 {
-				rounds = 1
+				candidateRounds = 1
 			}
 
-			candidates = appendConfiguration(candidates, configuration{streams: streams, rounds: rounds})
+			rounds = max(rounds, candidateRounds)
+			candidates = appendConfiguration(candidates, configuration{streams: streams, rounds: candidateRounds})
 		}
 	} else {
 		candidates = appendConfiguration(candidates, anchor.configuration)

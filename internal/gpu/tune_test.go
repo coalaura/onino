@@ -181,6 +181,86 @@ func TestTuningReturnsToIncumbent(t *testing.T) {
 	}
 }
 
+func TestTuningColdStartupExploresLongSubmissionsFirst(t *testing.T) {
+	fixture := tuningFixture{now: time.Unix(0, 0)}
+
+	tuner := fixture.tuner(Options{Streams: 16384, AutoRounds: true})
+	tuner.deadline = fixture.now.Add(4500 * time.Millisecond)
+
+	tuner.measure = func(config configuration, duration time.Duration) (observation, error) {
+		fixture.calls = append(fixture.calls, config)
+		fixture.now = fixture.now.Add(duration + settleDuration + 5*time.Millisecond)
+
+		return observation{configuration: config, rate: float64(config.rounds), tail: time.Duration(config.rounds) * 500 * time.Microsecond}, nil
+	}
+
+	selected, err := tuner.selectInitial()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if selected.configuration.rounds != 40 {
+		t.Fatalf("cold startup missed the throughput candidate: %+v, %v", selected, fixture.calls)
+	}
+
+	if fixture.now.After(tuner.deadline) {
+		t.Fatal("cold startup exceeded deadline")
+	}
+}
+
+func TestTuningFinalistsRejectSchedulingOutliers(t *testing.T) {
+	fixture := tuningFixture{now: time.Unix(0, 0)}
+	tuner := fixture.tuner(Options{Streams: 16384, AutoRounds: true})
+
+	var samples [MaxRounds + 1]int
+
+	tuner.measure = func(config configuration, duration time.Duration) (observation, error) {
+		fixture.calls = append(fixture.calls, config)
+		fixture.now = fixture.now.Add(duration + settleDuration + 5*time.Millisecond)
+
+		samples[config.rounds]++
+
+		rate := float64(config.rounds)
+
+		switch config.rounds {
+		case 20:
+			rate = 100
+
+			switch samples[20] {
+			case 2:
+				rate = 90
+			case 4:
+				rate = 110
+			}
+		case 40:
+			rate = 110
+
+			if samples[40] == 3 {
+				rate = 80
+			}
+		}
+
+		return observation{configuration: config, rate: rate, tail: time.Duration(config.rounds) * 500 * time.Microsecond}, nil
+	}
+
+	selected, err := tuner.selectInitial()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if selected.configuration.rounds != 40 || selected.rate != 110 {
+		t.Fatalf("scheduling variability hid a real throughput gain: %+v", selected)
+	}
+
+	if samples[20] != 4 || samples[40] != 4 {
+		t.Fatalf("finalists did not receive three fresh samples: %v", samples)
+	}
+
+	if fixture.now.After(tuner.deadline) {
+		t.Fatal("finalist repetitions exceeded startup deadline")
+	}
+}
+
 func TestFilterAcceptanceUnion(t *testing.T) {
 	patterns := []string{"a.", "ab.", "a.", "b.", "abcdefghijklmno."}
 

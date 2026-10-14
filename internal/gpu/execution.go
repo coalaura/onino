@@ -213,6 +213,7 @@ func (controller *execution) measure(configuration configuration, duration time.
 	checked := controller.stats.Checked
 	hits := controller.metrics.Hits
 	started := time.Now()
+	sampling := duration < trialDuration
 
 	for {
 		err = controller.ctx.Err()
@@ -240,29 +241,43 @@ func (controller *execution) measure(configuration configuration, duration time.
 			return observation{}, err
 		}
 
-		if controller.tail > flightLimit/2 || time.Since(started) >= duration {
+		elapsed := time.Since(started)
+		if !sampling && elapsed >= settleDuration {
+			// Score at collection boundaries with the pipeline already filled. Initial
+			// recording, stream uploads and final drainage still count as useful search,
+			// but do not bias a short throughput comparison against longer submissions.
+			before = controller.total()
+			checked = controller.stats.Checked
+			started = time.Now()
+			sampling = true
+			elapsed = 0
+		}
+
+		if controller.tail > flightLimit/2 || (sampling && elapsed >= duration) {
 			break
 		}
 	}
+
+	interval := time.Since(started)
+	rate := float64(controller.total()-before) / interval.Seconds()
+	completed := controller.stats.Checked - checked
 
 	err = controller.drain()
 	if err != nil {
 		return observation{}, err
 	}
 
-	interval := time.Since(started)
-
 	observation := observation{
 		configuration: configuration,
-		rate:          float64(controller.total()-before) / interval.Seconds(),
+		rate:          rate,
 		tail:          controller.tail,
 		hits:          controller.metrics.Hits - hits,
-		checked:       controller.stats.Checked - checked,
+		checked:       completed,
 		backlog:       controller.backlog,
 	}
 
 	if controller.options.Diagnostic != nil {
-		controller.options.Diagnostic(fmt.Sprintf("trial streams=%d rounds=%d combined_mps=%.3f (trial wall %.6fs, including drain) tail_ms=%.3f checked=%d hits=%d backlog=%d", configuration.streams, configuration.rounds, observation.rate/1e6, interval.Seconds(), float64(observation.tail)/1e6, observation.checked, observation.hits, observation.backlog))
+		controller.options.Diagnostic(fmt.Sprintf("trial streams=%d rounds=%d combined_mps=%.3f (sample wall %.6fs, transition/drain excluded) tail_ms=%.3f checked=%d hits=%d backlog=%d", configuration.streams, configuration.rounds, observation.rate/1e6, interval.Seconds(), float64(observation.tail)/1e6, observation.checked, observation.hits, observation.backlog))
 	}
 
 	if controller.tail > submissionLimit {

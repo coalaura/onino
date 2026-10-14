@@ -96,9 +96,25 @@ export function publish(root, rows, manifest, configurations, workloads) {
 		throw new Error("Embedded benchmark chart missing from index.html");
 	}
 
-	const embedded = svg(series, manifest, graphics, false).trimEnd().replace("<svg ", '<svg id="benchmark-chart" style="display:block;width:100%;height:auto" ').replace('aria-labelledby="title desc"', 'aria-labelledby="benchmark-chart-title benchmark-chart-desc"').replace('id="title"', 'id="benchmark-chart-title"').replace('id="desc"', 'id="benchmark-chart-desc"');
+	const embedded = svg(series, manifest, graphics, false).trimEnd().replace("<svg ", '<svg id="benchmark-chart" style="display:block;width:100%;height:auto" ').replace('aria-labelledby="title desc"', 'aria-labelledby="benchmark-chart-title benchmark-chart-desc"').replace('id="title"', 'id="benchmark-chart-title"').replace('id="desc"', 'id="benchmark-chart-desc"').replaceAll("/>", " />").replace("</g></svg>", "</g>\n</svg>");
 
-	writeFileSync(page, html.replace(chart, (match, indent) => embedded.split("\n").map(line => `${indent}${line}`).join("\n")));
+	writeFileSync(page, html.replace(chart, (match, indent) => {
+		let depth = 0;
+
+		return embedded.split("\n").map(line => {
+			if (line.startsWith("</")) {
+				depth--;
+			}
+
+			const formatted = `${indent}${"\t".repeat(depth)}${line}`;
+
+			if (line.startsWith("<svg ") || line.startsWith("<g ")) {
+				depth++;
+			}
+
+			return formatted;
+		}).join("\n");
+	}));
 
 	const table = configurations.map((config, index) => {
 		const cells = workloads.map(workload => {
@@ -114,11 +130,14 @@ export function publish(root, rows, manifest, configurations, workloads) {
 	const rareKeys = rows.filter(row => row.workload === "somethingrare").reduce((total, row) => total + row.key_files, 0),
 		publishingErrors = rows.some(row => row.tool === "onionloom" && /failed to atomically install key directory.*Access is denied/.test(row.diagnostic)),
 		failureNote = publishingErrors ? " Onionloom's incomplete cells include Windows key-publishing failures in the official binary; failed attempts remain in the CSV." : "",
+		oninoTimeouts = rows.filter(row => row.tool === "onino" && row.notes.includes("startup_or_mode_timeout")).length,
+		timeoutNote = oninoTimeouts ? ` Onino has ${oninoTimeouts} startup/mode timeout attempt(s), retained in the CSV and counted as incomplete.` : "",
+		replacementNote = manifest.replacement ? ` Only ${manifest.replacement.configuration} was rerun for this update; all other samples retain their original measurements and build metadata.` : "",
 		tick = "`";
 
 	const text = `## Benchmarks
 
-Measured ${manifest.started_utc.slice(0, 10)} on **${manifest.hardware.cpu.trim()}**, **${manifest.threads} available CPU threads**, **${manifest.hardware.platform} ${manifest.hardware.release}**, **${graphics}**. Values are median **million candidates/second** from ${manifest.options.runs} runs; higher is better. The primary ${tick}somethingrare${tick} workload produced ${rareKeys} key files.
+Measured ${manifest.started_utc.slice(0, 10)} on **${manifest.hardware.cpu.trim()}**, **${manifest.threads} available CPU threads**, **${manifest.hardware.platform} ${manifest.hardware.release}**, **${graphics}**. Values are median **million candidates/second** from ${manifest.options.runs} runs; higher is better. The primary ${tick}somethingrare${tick} workload produced ${rareKeys} key files.${replacementNote}
 
 | Configuration | ${tick}somethingrare${tick} | ${tick}hello${tick} | ${tick}privacy${tick} | ${tick}donate${tick}, ${tick}mirror${tick}, ${tick}secure${tick} |
 | --- | ---: | ---: | ---: | ---: |
@@ -132,9 +151,9 @@ ${table.join("\n")}
 
 **Method.** Sequential runs rotate configuration and workload order. Each warms up for ≥${manifest.options.warmup}s after the first observed post-setup search counter, then measures a ~${manifest.options.seconds}s progress-bounded window. Candidate-counter deltas use external monotonic wall time, excluding startup/autotuning. Onino and Prefix32 counters are rounded; mkp224o's cumulative count is reconstructed from its ${tick}-T${tick} average × elapsed time. Precision bounds are recorded. Normal key saving remains enabled and saved prefixes/checksums are checked. Shutdown/save drainage is outside measurement (forced termination on Windows); this measures search throughput, not completed-key delivery.
 
-**Modes and limits.** CPU and CPU+GPU use all available search workers. Onionloom GPU-assisted retains **one CPU search worker**. Onino GPU-only uses host coordination without CPU search. Prefix32 GPU-accelerated uses CPU assistance, **not independent CPU search**. Prefix32 CPU stops on its first match, so shorter workloads have no sustained estimate; surviving runs are not selectively averaged. Its fixed ${tick}prefix32p${tick} ${tick}--bench${tick} is not substituted. Multiple prefixes mean OR. Exits, missing capabilities and invalid samples are explicit; medians require all runs to be valid.${failureNote}
+**Modes and limits.** CPU and CPU+GPU use all available search workers. Onionloom GPU-assisted retains **one CPU search worker**. Onino GPU-only uses host coordination without CPU search. Prefix32 GPU-accelerated uses CPU assistance, **not independent CPU search**. Prefix32 CPU stops on its first match, so shorter workloads have no sustained estimate; surviving runs are not selectively averaged. Its fixed ${tick}prefix32p${tick} ${tick}--bench${tick} is not substituted. Multiple prefixes mean OR. Exits, missing capabilities and invalid samples are explicit; medians require all runs to be valid.${failureNote}${timeoutNote}
 
-**Reproduce:** manually extract unmodified official [mkp224o](https://github.com/cathugger/mkp224o/releases), [Onionloom](https://github.com/chrisch88dev/onionloom/releases) and [Prefix32](https://github.com/0xROOTPLS/Prefix32/releases) releases under ignored ${tick}bin/${tick}, keeping one executable per tool and its shipped libraries. With Bun and the build prerequisites above installed, run **${tick}bun bench/run.mjs${tick}**. It builds onino with builder/PACE, GPU enabled and PGO off, runs all checks, and regenerates this section, the CSV and both SVG themes. ${tick}--onino PATH${tick} accepts an existing build; ${tick}--resume measurements/bench-ID${tick} continues a stopped suite. Logs and real keys stay in ignored ${tick}measurements/${tick}; allow about two hours. Prefix32's own tuning cache is reused and recorded.
+**Reproduce:** manually extract unmodified official [mkp224o](https://github.com/cathugger/mkp224o/releases), [Onionloom](https://github.com/chrisch88dev/onionloom/releases) and [Prefix32](https://github.com/0xROOTPLS/Prefix32/releases) releases under ignored ${tick}bin/${tick}, keeping one executable per tool and its shipped libraries. With Bun and the build prerequisites above installed, run **${tick}bun bench/run.mjs${tick}**. It builds onino with builder/PACE, GPU enabled and PGO off, runs all checks, and regenerates this section, the CSV and both SVG themes. ${tick}--onino PATH${tick} accepts an existing build; ${tick}--resume measurements/bench-ID${tick} continues a stopped suite. ${tick}--baseline measurements/bench-ID --replace onino-combined${tick} reruns only Onino CPU+GPU, retaining the other samples and their original metadata. Logs and real keys stay in ignored ${tick}measurements/${tick}; allow about two hours for a full suite. Prefix32's own tuning cache is reused and recorded.
 
 The [consolidated CSV](.github/benchmarks.csv) contains every sample, exact versions/hashes, commands, build details, hardware and selected runtime settings. Versions: ${manifest.tools.mkp224o.version}, ${manifest.tools.onionloom.version.split("\n")[0]}, ${manifest.tools.prefix32.version}; onino ${tick}${manifest.tools.onino.version}${tick}. Unreported competitor compiler flags remain unknown. Earlier [Linux summaries](.github/linux-rare-prefix.csv) and [progress reports](.github/linux-rare-prefix-progress.csv) remain historical records with different workloads/timing.
 

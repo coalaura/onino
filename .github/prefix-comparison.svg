@@ -35,9 +35,9 @@
 <path d="M775.415044745625 373H780.0049280551943M775.415044745625 366V380M780.0049280551943 366V380" stroke="#f3eedf" stroke-width="2"/>
 <text x="1060" y="378" text-anchor="end" font-size="16">9,550.1</text>
 <text x="30" y="425" font-size="16">Onino CPU+GPU</text>
-<rect x="340" y="406" width="483.23498517543305" height="27" rx="3" fill="#b18ad5"/>
-<path d="M779.9683486769961 420H835.218653892253M779.9683486769961 413V427M835.218653892253 413V427" stroke="#f3eedf" stroke-width="2"/>
-<text x="1060" y="425" text-anchor="end" font-size="16">10,543.3</text>
+<rect x="340" y="406" width="501.64578800654397" height="27" rx="3" fill="#b18ad5"/>
+<path d="M832.8695854756133 420H843.9035987539012M832.8695854756133 413V427M843.9035987539012 413V427" stroke="#f3eedf" stroke-width="2"/>
+<text x="1060" y="425" text-anchor="end" font-size="16">10,945.0</text>
 <text x="30" y="472" font-size="16">Prefix32 CPU</text>
 <rect x="340" y="453" width="21.162904838429323" height="27" rx="3" fill="#b18ad5"/>
 <path d="M360.884936660687 467H361.3134493795346M360.884936660687 460V474M361.3134493795346 460V474" stroke="#f3eedf" stroke-width="2"/>
