@@ -663,50 +663,10 @@
 				margin: 0 8px;
 			}
 
-			.benchmark-controls {
-				margin-top: 30px;
-				display: flex;
-				align-items: center;
-				gap: 20px;
-				flex-wrap: wrap;
-			}
-
-			.benchmark-control-label {
-				color: #a99cb4;
-				font: .75rem var(--mono);
-			}
-
-			.workload-selector {
-				display: flex;
-				gap: 6px;
-				flex-wrap: wrap;
-			}
-
-			.workload-selector button {
-				padding: 9px 12px;
-				border: 1px solid #3c3344;
-				background: transparent;
-				color: #b7acbf;
-				font: .8125rem/1.5 var(--mono);
-			}
-
-			.workload-selector button:hover {
-				border-color: var(--purple);
-				color: var(--text);
-			}
-
-			.workload-selector .selected {
-				background: #302239;
-				border-color: #856097;
-				color: var(--text);
-			}
-
 			.benchmark-figure {
 				margin: 27px 0 0;
 				padding: 25px 0 0;
 				border-top: 1px solid var(--border);
-				--chart-label: 225px;
-				--chart-value: 85px;
 			}
 
 			.benchmark-figure figcaption {
@@ -715,125 +675,6 @@
 				gap: 15px;
 				font: .75rem/1.7 var(--mono);
 				color: #aea2b7;
-			}
-
-			.benchmark-axis {
-				margin: 24px calc(var(--chart-value) + 18px) 0 calc(var(--chart-label) + 18px);
-				display: flex;
-				justify-content: space-between;
-				font: .75rem/1.5 var(--mono);
-				color: #a697b0;
-			}
-
-			.benchmark-group {
-				padding-top: 17px;
-			}
-
-			.benchmark-group+.benchmark-group {
-				margin-top: 14px;
-				border-top: 1px solid #2c2632;
-			}
-
-			.benchmark-group h3 {
-				font: .75rem/1.6 var(--mono);
-				color: #aaa0b3;
-				margin-bottom: 9px;
-			}
-
-			.benchmark-row {
-				display: grid;
-				grid-template-columns: var(--chart-label) minmax(0, 1fr) var(--chart-value);
-				gap: 18px;
-				align-items: center;
-				min-height: 44px;
-			}
-
-			.benchmark-miner {
-				color: #cbc4d0;
-				font-size: .9375rem;
-				line-height: 1.5;
-			}
-
-			.benchmark-miner span {
-				font: .75rem/1.6 var(--mono);
-				margin-left: 8px;
-				color: #a99db3;
-			}
-
-			.benchmark-track {
-				height: 20px;
-				border-left: 1px solid #504456;
-				background: repeating-linear-gradient(to right, transparent 0, transparent calc(33.3333% - 1px), #29242f calc(33.3333% - 1px), #29242f 33.3333%);
-			}
-
-			.benchmark-bar {
-				height: 100%;
-				background: #777080;
-			}
-
-			.benchmark-row-onino .benchmark-bar {
-				background: var(--purple);
-			}
-
-			.benchmark-row-best .benchmark-bar {
-				background: var(--green);
-			}
-
-			.benchmark-row-best .benchmark-miner,
-			.benchmark-row-best .benchmark-value {
-				color: var(--green);
-			}
-
-			.benchmark-value {
-				font: .9375rem/1.5 var(--mono);
-				color: #d2cbd9;
-				text-align: right;
-				font-variant-numeric: tabular-nums;
-			}
-
-			.benchmark-workload-note {
-				margin-top: 20px;
-				font-size: .8125rem;
-				line-height: 1.8;
-				color: #a99db3;
-			}
-
-			.benchmark-ratios {
-				display: grid;
-				grid-template-columns: 1fr 1fr;
-				gap: 30px;
-				margin-top: 28px;
-				padding: 23px 0;
-				border-top: 1px solid var(--border);
-				border-bottom: 1px solid var(--border);
-			}
-
-			.benchmark-ratios>div {
-				display: flex;
-				align-items: center;
-				gap: 20px;
-			}
-
-			.benchmark-ratios strong {
-				font: 2.4rem/1.2 var(--mono);
-				letter-spacing: -.06em;
-				color: var(--green);
-			}
-
-			.benchmark-ratios>div+div strong {
-				color: var(--purple);
-			}
-
-			.benchmark-ratios p {
-				color: #c9c0d1;
-				font-size: .875rem;
-				line-height: 1.6;
-			}
-
-			.benchmark-ratios p span {
-				display: block;
-				color: #a99db3;
-				font: .75rem/1.8 var(--mono);
 			}
 
 			.benchmark-details {
@@ -1208,30 +1049,6 @@
 					padding-top: 35px;
 				}
 
-				.benchmark-figure {
-					--chart-label: 165px;
-					--chart-value: 75px;
-				}
-
-				.benchmark-miner span {
-					display: block;
-					margin-left: 0;
-				}
-
-				.benchmark-row {
-					padding: 8px 0;
-				}
-
-				.benchmark-ratios {
-					gap: 18px;
-				}
-
-				.benchmark-ratios>div {
-					flex-direction: column;
-					align-items: flex-start;
-					gap: 10px;
-				}
-
 				.page-shell {
 					padding: 0 24px;
 				}
@@ -1424,46 +1241,6 @@
 					gap: 3px;
 				}
 
-				.benchmark-axis {
-					margin: 20px 0 0;
-				}
-
-				.benchmark-row {
-					grid-template-columns: minmax(0, 1fr) auto;
-					gap: 7px 14px;
-					padding: 10px 0;
-				}
-
-				.benchmark-miner span {
-					display: inline;
-					margin-left: 5px;
-				}
-
-				.benchmark-track {
-					grid-row: 2;
-					grid-column: 1 / -1;
-					height: 16px;
-				}
-
-				.benchmark-value {
-					grid-row: 1;
-					grid-column: 2;
-					font-size: .875rem;
-				}
-
-				.benchmark-controls {
-					gap: 10px;
-				}
-
-				.benchmark-control-label {
-					width: 100%;
-				}
-
-				.workload-selector button {
-					padding: 8px 9px;
-					font-size: .75rem;
-				}
-
 				.benchmark-hardware span {
 					margin: 0 4px;
 				}
@@ -1538,7 +1315,7 @@
 						</div>
 						
 						<a class="hero-performance" href="#benchmarks">
-							<strong>4.12 billion</strong> candidates/s
+							<strong>Measured performance</strong> across CPU and GPU modes
 						</a>
 						
 						<p class="hero-meta">
@@ -1600,205 +1377,44 @@
 						<div>
 							<p class="eyebrow">BENCHMARKS</p>
 
-							<h2 id="benchmark-title">Fastest in all four tested workloads.</h2>
+							<h2 id="benchmark-title">One reproducible comparison suite.</h2>
 						</div>
 
 						<a class="text-link" href="https://github.com/coalaura/onino#benchmarks">Full methodology</a>
 					</div>
 
 					<p class="benchmark-intro">
-						onino leads the CPU-only and CPU + GPU comparisons against onionloom and mkp224o. These are project measurements on the same machine.
+						Compare onino, mkp224o, Onionloom and Prefix32 on the same hardware, using unmodified official competitor binaries and normal key saving.
 					</p>
-
-					<p class="benchmark-hardware">
-						Ryzen 9 9950X3D <span>/</span> 32 CPU workers <span>/</span> RTX 5090 for GPU runs <span>/</span> Windows 11
-					</p>
-
-					<div class="benchmark-controls"><span class="benchmark-control-label">Prefix</span>
-						<div class="workload-selector" role="group" aria-label="Benchmark workload" hidden>
-							<button type="button" data-workload="hello" aria-pressed="false">hello</button>
-							<button type="button" data-workload="privacy" aria-pressed="true" class="selected">privacy</button>
-							<button type="button" data-workload="multiple" aria-pressed="false">donate / mirror / secure</button>
-							<button type="button" data-workload="rare" aria-pressed="false">somethingrare</button>
-						</div>
-
-						<noscript><code>privacy</code></noscript>
-					</div>
 
 					<figure class="benchmark-figure" aria-labelledby="benchmark-caption">
 						<figcaption id="benchmark-caption">
-							<span>Median throughput . million candidates/s</span>
-							<span>Higher is better</span>
+							<span>Sustained somethingrare search · million candidates/s</span>
+							<span>Median and min–max</span>
 						</figcaption>
-
-						<div class="benchmark-axis" aria-hidden="true">
-							<span>0</span>
-							<span>1,500</span>
-							<span>3,000</span>
-							<span>4,500</span>
-						</div>
-
-						<div class="benchmark-group">
-							<h3>CPU + GPU</h3>
-
-							<div class="benchmark-row benchmark-row-best" data-series="oninoGPU">
-								<div class="benchmark-miner">onino <span>AVX-512 + Vulkan</span></div>
-
-								<div class="benchmark-track" aria-hidden="true">
-									<div class="benchmark-bar" style="width:91.553333%"></div>
-								</div>
-
-								<div class="benchmark-value">4,119.9</div>
-							</div>
-							<div class="benchmark-row" data-series="onionloomGPU">
-								<div class="benchmark-miner">onionloom <span>GPU forced</span></div>
-
-								<div class="benchmark-track" aria-hidden="true">
-									<div class="benchmark-bar" style="width:9.377778%"></div>
-								</div>
-
-								<div class="benchmark-value">422.0</div>
-							</div>
-						</div>
-						<div class="benchmark-group">
-							<h3>CPU only</h3>
-
-							<div class="benchmark-row benchmark-row-onino" data-series="oninoCPU">
-								<div class="benchmark-miner">onino <span>AVX-512</span></div>
-
-								<div class="benchmark-track" aria-hidden="true">
-									<div class="benchmark-bar" style="width:29.424444%"></div>
-								</div>
-
-								<div class="benchmark-value">1,324.1</div>
-							</div>
-							<div class="benchmark-row benchmark-row-onino" data-series="oninoScalar">
-								<div class="benchmark-miner">onino <span>BMI2 + ADX</span></div>
-
-								<div class="benchmark-track" aria-hidden="true">
-									<div class="benchmark-bar" style="width:9.377778%"></div>
-								</div>
-
-								<div class="benchmark-value">422.0</div>
-							</div>
-							<div class="benchmark-row" data-series="onionloomCPU">
-								<div class="benchmark-miner">onionloom</div>
-
-								<div class="benchmark-track" aria-hidden="true">
-									<div class="benchmark-bar" style="width:7.671111%"></div>
-								</div>
-
-								<div class="benchmark-value">345.2</div>
-							</div>
-							<div class="benchmark-row" data-series="mkpCPU">
-								<div class="benchmark-miner">mkp224o</div>
-
-								<div class="benchmark-track" aria-hidden="true">
-									<div class="benchmark-bar" style="width:2.895556%"></div>
-								</div>
-
-								<div class="benchmark-value">130.3</div>
-							</div>
-						</div>
-
-						<p class="benchmark-workload-note" id="benchmark-workload-note">
-							Prefix: privacy. Five samples per configuration; medians shown.
-						</p>
+						<img src="prefix-comparison.svg" width="1100" height="650" alt="All nine CPU and GPU configurations on the same sustained somethingrare workload; median bars and min–max whiskers." style="width:100%;height:auto">
 					</figure>
-					<div class="benchmark-ratios" aria-live="polite" aria-atomic="true">
-						<div>
-							<strong id="gpu-ratio">9.76x</strong>
-							<p>onionloom throughput<span>CPU + GPU</span></p>
-						</div>
-						<div>
-							<strong id="cpu-ratio">3.84x</strong>
-							<p>onionloom throughput<span>CPU only . onino AVX-512</span></p>
-						</div>
-					</div>
 					<details class="benchmark-details">
 						<summary>Measurements and test conditions</summary>
-
-						<div class="benchmark-table-scroll" tabindex="0" role="region" aria-label="All benchmark medians">
-							<table class="benchmark-table">
-								<caption>Median throughput, million candidates/s</caption>
-								<thead>
-									<tr>
-										<th scope="col">Prefix</th>
-										<th scope="col">mkp224o<br>CPU</th>
-										<th scope="col">onionloom<br>CPU</th>
-										<th scope="col">onino<br>BMI2 + ADX</th>
-										<th scope="col">onino<br>AVX-512</th>
-										<th scope="col">onionloom<br>CPU + GPU</th>
-										<th scope="col">onino<br>CPU + GPU</th>
-									</tr>
-								</thead>
-								<tbody>
-									<tr>
-										<th scope="row">hello</th>
-										<td>129.5</td>
-										<td>343.4</td>
-										<td>419.6</td>
-										<td>1,280.6</td>
-										<td>419.3</td>
-										<td>3,981.5</td>
-									</tr>
-									<tr>
-										<th scope="row">privacy</th>
-										<td>130.3</td>
-										<td>345.2</td>
-										<td>422.0</td>
-										<td>1,324.1</td>
-										<td>422.0</td>
-										<td>4,119.9</td>
-									</tr>
-									<tr>
-										<th scope="row">donate / mirror / secure</th>
-										<td>111.2</td>
-										<td>332.8</td>
-										<td>410.7</td>
-										<td>1,303.3</td>
-										<td>408.3</td>
-										<td>4,084.7</td>
-									</tr>
-									<tr>
-										<th scope="row">somethingrare</th>
-										<td>130.4</td>
-										<td>345.1</td>
-										<td>422.3</td>
-										<td>1,320.1</td>
-										<td>421.7</td>
-										<td>4,114.2</td>
-									</tr>
-								</tbody>
-							</table>
-						</div>
 						<p>
-							Five samples per configuration and workload, with roughly 20-22-second measurement windows after warm-up.
-							Throughput uses candidate-count deltas over wall time; GPU setup and tuning are excluded. Runs use normal
-							key-file output. The somethingrare workload produced no matches, so it measures search without match-saving I/O.
+							At least five runs per configuration, rotating execution order, with at least 15 seconds of actual search warmup and approximately 20-second measurement windows. Candidate-counter deltas use external wall time; startup and autotuning are excluded. Run <code>bun bench/run.mjs</code> to reproduce the suite and regenerate the published results.
 						</p>
 						<p>
-							Tested: onino v0.3.0 (PACE Go 1.27.1, PGO off), onionloom v1.0.1 and mkp224o v1.7.0. Onino and onionloom CPU + GPU
-							measurements are from 8 October 2026; competitor CPU-only measurements are retained from 6 October. Fresh
-							configurations ran in blocks with some alternating runs, rather than a fully interleaved comparison. Both GPU
-							configurations used NVIDIA driver 616.64.
+							Onionloom's GPU-focused configuration includes one CPU search worker; CPU+GPU uses all workers. Onino GPU-only has no CPU search workers. Prefix32's GPU mode uses CPU assistance without independent CPU search. Prefix32 CPU stops on its first match, so shorter searches are not published as sustained comparisons. Its fixed-workload <code>--bench</code> results are not substituted.
 						</p>
 						<p>
-							The repository's historical "AVX2" series used BMI2 + ADX field arithmetic; it is labeled accordingly here.
-							All bars share a zero-based scale. Ratios compare matching CPU-only or CPU + GPU configurations. Results apply
-							to these versions, workloads and hardware.
+							The README includes shorter and multi-prefix workloads. The consolidated dataset records all attempts, exact versions and hashes, hardware, build settings, selected modes, counter precision and any exits or unavailable capabilities.
 						</p>
 						<div class="benchmark-source-links">
-							<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/prefix-comparison.csv">Raw samples</a>
-							<a class="text-link" href="https://github.com/coalaura/onino#benchmarks">Ranges and methodology</a>
-							<a class="text-link" href="https://github.com/coalaura/onino#linux-single-worker-rare-prefix-runs">Linux single-worker results</a>
+							<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/benchmarks.csv">All samples and metadata</a>
+							<a class="text-link" href="https://github.com/coalaura/onino#benchmarks">Table and methodology</a>
 						</div>
 					</details>
 
 					<section class="machine-benchmarks" aria-labelledby="machine-title">
-						<p class="eyebrow">SERVER / VPS / LAPTOP</p>
+						<p class="eyebrow">HISTORICAL RESEARCH / SERVER / VPS / LAPTOP</p>
 
-						<h3 id="machine-title">Ahead on all three additional machines.</h3>
+						<h3 id="machine-title">Earlier single-worker Linux measurements.</h3>
 
 						<p class="benchmark-intro">
 							onino also leads onionloom on an Intel server, a Haswell-class VPS and an AMD laptop. Each uses one CPU worker and automatic backend selection.
@@ -1962,7 +1578,7 @@
 							<div class="benchmark-source-links">
 								<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/linux-rare-prefix-progress.csv">148 progress samples</a>
 								<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/linux-rare-prefix.csv">Run summaries and commands</a>
-								<a class="text-link" href="https://github.com/coalaura/onino#linux-single-worker-rare-prefix-runs">Full Linux methodology</a>
+								<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/linux-rare-prefix.csv">Historical Linux samples</a>
 							</div>
 						</details>
 					</section>
@@ -2203,43 +1819,6 @@
 					});
 				});
 
-				const workloads = {
-					hello: { label: "hello", oninoGPU: 3981.5, onionloomGPU: 419.3, oninoCPU: 1280.6, oninoScalar: 419.6, onionloomCPU: 343.4, mkpCPU: 129.5 },
-					privacy: { label: "privacy", oninoGPU: 4119.9, onionloomGPU: 422.0, oninoCPU: 1324.1, oninoScalar: 422.0, onionloomCPU: 345.2, mkpCPU: 130.3 },
-					multiple: { label: "donate / mirror / secure (any prefix)", oninoGPU: 4084.7, onionloomGPU: 408.3, oninoCPU: 1303.3, oninoScalar: 410.7, onionloomCPU: 332.8, mkpCPU: 111.2 },
-					rare: { label: "somethingrare (no matches)", oninoGPU: 4114.2, onionloomGPU: 421.7, oninoCPU: 1320.1, oninoScalar: 422.3, onionloomCPU: 345.1, mkpCPU: 130.4 }
-				};
-
-				const numberFormat = new Intl.NumberFormat("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
-					workloadButtons = document.querySelectorAll("[data-workload]"),
-					benchmarkRows = document.querySelectorAll("[data-series]");
-
-				document.querySelector(".workload-selector").hidden = false;
-
-				workloadButtons.forEach((button) => {
-					button.addEventListener("click", () => {
-						const workload = workloads[button.dataset.workload];
-
-						workloadButtons.forEach((option) => {
-							const selected = option === button;
-
-							option.classList.toggle("selected", selected);
-							option.setAttribute("aria-pressed", String(selected));
-						});
-
-						benchmarkRows.forEach((row) => {
-							const value = workload[row.dataset.series];
-
-							row.querySelector(".benchmark-bar").style.width = `${value / 4500 * 100}%`;
-							row.querySelector(".benchmark-value").textContent = numberFormat.format(value);
-						});
-
-						document.getElementById("gpu-ratio").textContent = `${(workload.oninoGPU / workload.onionloomGPU).toFixed(2)}x`;
-						document.getElementById("cpu-ratio").textContent = `${(workload.oninoCPU / workload.onionloomCPU).toFixed(2)}x`;
-
-						document.getElementById("benchmark-workload-note").textContent = `Prefix: ${workload.label}. Five samples per configuration; medians shown.`;
-					});
-				});
 			})();
 		</script>
 	</body>

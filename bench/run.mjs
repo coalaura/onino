@@ -1,0 +1,96 @@
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { availableParallelism } from "node:os";
+import { collect, hash } from "./system.mjs";
+import { trial } from "./trial.mjs";
+import { publish, csv } from "./report.mjs";
+
+export const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+const options = { runs: 5, warmup: 15, seconds: 20, resume: "", onino: "" };
+const args = process.argv.slice(2);
+for (let index = 0; index < args.length; index++) {
+	const name = args[index].replace(/^--/, "");
+	if (name === "help") {
+		console.log("bun bench/run.mjs [--onino PATH] [--runs 5] [--warmup 15] [--seconds 20] [--resume measurements/bench-ID]\nRequires manually downloaded official mkp224o, Onionloom and Prefix32 executables under bin/. Builds onino with builder (PACE, CGO, gpu); --onino supplies an existing build instead. Runs all modes and workloads, validates counters/modes/saved files, and updates .github/benchmarks.csv, comparison SVGs and README. Logs and saved keys stay under ignored measurements/. Resume continues a stopped suite without rerunning completed attempts.");
+		process.exit(0);
+	}
+	if (!(name in options) || args[index + 1] === undefined) {
+		throw new Error(`Unknown or incomplete option: ${args[index]}`);
+	}
+	options[name] = typeof options[name] === "number" ? Number(args[++index]) : args[++index];
+}
+if (!Number.isInteger(options.runs) || options.runs < 5 || !Number.isFinite(options.warmup) || options.warmup < 15 || !Number.isFinite(options.seconds) || options.seconds < 20) {
+	throw new Error("Require at least five runs, 15 seconds warmup and 20 seconds target measurement.");
+}
+
+const directory = options.resume ? resolve(root, options.resume) : join(root, "measurements", `bench-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+mkdirSync(directory, { recursive: true });
+const manifestPath = join(directory, "manifest.json");
+let manifest;
+if (options.resume) {
+	manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+	for (const tool of Object.values(manifest.tools)) {
+		if (tool.path && hash(tool.path) !== tool.sha256) {
+			throw new Error(`Binary changed since suite began: ${tool.path}`);
+		}
+	}
+	manifest.runner = Object.fromEntries(["run.mjs", "system.mjs", "trial.mjs", "report.mjs"].map(name => [name, hash(join(root, "bench", name))]));
+} else {
+	manifest = collect(root, directory, options, availableParallelism());
+	writeFileSync(manifestPath, JSON.stringify(manifest, null, "\t"));
+}
+
+const configurations = [
+	{ id: "mkp224o-cpu", tool: "mkp224o", mode: "CPU", workers: manifest.threads },
+	{ id: "onionloom-cpu", tool: "onionloom", mode: "CPU", workers: manifest.threads },
+	{ id: "onionloom-gpu", tool: "onionloom", mode: "GPU-assisted + 1 CPU search worker", workers: 1 },
+	{ id: "onionloom-combined", tool: "onionloom", mode: "CPU+GPU", workers: manifest.threads },
+	{ id: "onino-cpu", tool: "onino", mode: "CPU", workers: manifest.threads },
+	{ id: "onino-gpu", tool: "onino", mode: "GPU-only (host coordination)", workers: 0 },
+	{ id: "onino-combined", tool: "onino", mode: "CPU+GPU", workers: manifest.threads },
+	{ id: "prefix32-cpu", tool: "prefix32", mode: "CPU", workers: manifest.threads },
+	{ id: "prefix32-gpu", tool: "prefix32", mode: "GPU-accelerated (CPU assistance; no CPU search)", workers: 0 }
+];
+const workloads = ["somethingrare", "hello", "privacy", "donate+mirror+secure"];
+const rows = [];
+let order = 0;
+console.log(`Suite: ${directory}\n${manifest.threads} available CPU threads; ${manifest.options.runs} rounds, ${manifest.options.warmup}s warmup, ~${manifest.options.seconds}s measurement. Normal key saving is enabled.`);
+for (let round = 0; round < manifest.options.runs; round++) {
+	for (let workloadIndex = 0; workloadIndex < workloads.length; workloadIndex++) {
+		const workloadPosition = (workloadIndex + round) % workloads.length;
+		const workload = workloads[workloadPosition];
+		for (let configurationIndex = 0; configurationIndex < configurations.length; configurationIndex++) {
+			const configuration = configurations[(configurationIndex + round + workloadPosition) % configurations.length];
+			order++;
+			const name = `${String(order).padStart(3, "0")}-${configuration.id}-${workload}`;
+			const resultPath = join(directory, `${name}.json`);
+			let row;
+			if (existsSync(resultPath)) {
+				row = JSON.parse(readFileSync(resultPath, "utf8"));
+			} else {
+				console.log(`[${order}/${manifest.options.runs * workloads.length * configurations.length}] round ${round + 1} ${configuration.id} ${workload}`);
+				const attempt = join(directory, name);
+				if (existsSync(attempt) && readdirSync(attempt).length) {
+					throw new Error(`Interrupted attempt retained at ${attempt}; move it aside before resuming so key output starts empty.`);
+				}
+				row = await trial(manifest, configuration, workload, round + 1, order, attempt);
+				if (row.status === "interrupted") {
+					throw new Error(`Suite interrupted; retained ${attempt}. Move the incomplete attempt aside before --resume.`);
+				}
+				writeFileSync(resultPath, JSON.stringify(row, null, "\t"));
+				console.log(`  ${row.status}${row.million_per_second ? `: ${Number(row.million_per_second).toFixed(1)} M/s` : ""}; ${row.notes}`);
+			}
+			rows.push(row);
+			writeFileSync(join(directory, "samples.csv"), csv(rows));
+		}
+	}
+}
+for (const tool of Object.values(manifest.tools)) {
+	if (tool.path && hash(tool.path) !== tool.sha256) {
+		throw new Error(`Binary changed during suite: ${tool.path}`);
+	}
+}
+publish(root, rows, manifest, configurations, workloads);
+console.log(`Published ${rows.length} attempts to .github/benchmarks.csv. Full transcripts and keys: ${directory}`);

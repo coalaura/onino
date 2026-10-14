@@ -130,99 +130,33 @@ CPU workers usually generate paired candidates around 256 independent affine Edw
 
 ## Benchmarks
 
-### Windows multi-worker and GPU comparison
+Measured 2026-10-14 on **AMD Ryzen 9 9950X3D 16-Core Processor**, **32 available CPU threads**, **win32 10.0.26200**, **NVIDIA GeForce RTX 5090 . driver 617.42**. Values are median **million candidates/second** from 5 runs; higher is better. The primary `somethingrare` workload produced 0 key files.
 
-Prefix searches on an **AMD Ryzen 9 9950X3D**, Windows 11, with **32 CPU workers**, an **NVIDIA GeForce RTX 5090** for CPU+GPU runs and normal key-file output. Onino CPU-only AVX2, CPU-only AVX-512 and AVX-512+GPU results are freshly measured, alongside onionloom CPU+GPU. Onionloom and mkp224o CPU-only results are retained from the previous comparison. Rates are **million candidates/second**; higher is better.
+| Configuration | `somethingrare` | `hello` | `privacy` | `donate`, `mirror`, `secure` |
+| --- | ---: | ---: | ---: | ---: |
+| mkp224o CPU | 128.0 | 126.7 | 128.0 | 109.3 |
+| Onionloom CPU | 336.4 | incomplete (2/5) | 336.0 | 324.6 |
+| Onionloom GPU + 1 CPU worker | 130.2 | 130.1 | 130.2 | 128.7 |
+| Onionloom CPU+GPU | 397.5 | incomplete (3/5) | 399.4 | incomplete (4/5) |
+| Onino CPU | 1,294.6 | 1,241.9 | 1,295.4 | 1,278.7 |
+| Onino GPU-only | 9,550.1 | 9,499.5 | 9,550.1 | 9,549.9 |
+| Onino CPU+GPU | 10,543.3 | 2,281.7 | 10,707.4 | 9,836.6 |
+| Prefix32 CPU | 461.7 | stops on match | stops on match | stops on match |
+| Prefix32 GPU-accelerated | 10,220.2 | 7,808.2 | 10,234.7 | 9,892.4 |
 
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset=".github/prefix-comparison.svg">
 	<source media="(prefers-color-scheme: light)" srcset=".github/prefix-comparison-light.svg">
-	<img alt="Median throughput for mkp224o CPU, onionloom CPU, onino CPU AVX2, onino CPU AVX-512, onionloom CPU+GPU and onino AVX-512+GPU across four prefix workloads, including a no-match case, on a shared zero-based scale." src=".github/prefix-comparison-light.svg">
+	<img alt="Sustained somethingrare throughput: all nine configurations, median and min-max, on a shared zero-based scale." src=".github/prefix-comparison-light.svg">
 </picture>
 
-**Median throughput**
+**Method.** Sequential runs rotate configuration and workload order. Each warms up for >=15s after the first observed post-setup search counter, then measures a ~20s progress-bounded window. Candidate-counter deltas use external monotonic wall time, excluding startup/autotuning. Onino and Prefix32 counters are rounded; mkp224o's cumulative count is reconstructed from its `-T` average x elapsed time. Precision bounds are recorded. Normal key saving remains enabled and saved prefixes/checksums are checked. Shutdown/save drainage is outside measurement (forced termination on Windows); this measures search throughput, not completed-key delivery.
 
-| Prefixes | mkp224o CPU | onionloom CPU | onino CPU AVX2 | onino CPU AVX-512 | onionloom CPU+GPU | onino AVX-512+GPU |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hello` | 129.5 | 343.4 | 419.6 | 1,280.6 | 419.3 | **3,981.5** |
-| `privacy` | 130.3 | 345.2 | 422.0 | 1,324.1 | 422.0 | **4,119.9** |
-| `donate`, `mirror`, `secure` | 111.2 | 332.8 | 410.7 | 1,303.3 | 408.3 | **4,084.7** |
-| `somethingrare` (no matches) | 130.4 | 345.1 | 422.3 | 1,320.1 | 421.7 | **4,114.2** |
+**Modes and limits.** CPU and CPU+GPU use all available search workers. Onionloom GPU-assisted retains **one CPU search worker**. Onino GPU-only uses host coordination without CPU search. Prefix32 GPU-accelerated uses CPU assistance, **not independent CPU search**. Prefix32 CPU stops on its first match, so shorter workloads have no sustained estimate; surviving runs are not selectively averaged. Its fixed `prefix32p` `--bench` is not substituted. Multiple prefixes mean OR. Exits, missing capabilities and invalid samples are explicit; medians require all runs to be valid. Onionloom's incomplete cells include Windows key-publishing failures in the official binary; failed attempts remain in the CSV.
 
-**Min-max throughput**
+**Reproduce:** manually extract unmodified official [mkp224o](https://github.com/cathugger/mkp224o/releases), [Onionloom](https://github.com/chrisch88dev/onionloom/releases) and [Prefix32](https://github.com/0xROOTPLS/Prefix32/releases) releases under ignored `bin/`, keeping one executable per tool and its shipped libraries. With Bun and the build prerequisites above installed, run **`bun bench/run.mjs`**. It builds onino with builder/PACE, GPU enabled and PGO off, runs all checks and regenerates this section, the CSV and both SVG themes. `--onino PATH` accepts an existing build; `--resume measurements/bench-ID` continues a stopped suite. Logs and real keys stay in ignored `measurements/`; allow about two hours. Prefix32's own tuning cache is reused and recorded.
 
-| Prefixes | mkp224o CPU | onionloom CPU | onino CPU AVX2 | onino CPU AVX-512 | onionloom CPU+GPU | onino AVX-512+GPU |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hello` | 129.0-130.3 | 338.6-345.2 | 416.1-420.9 | 1,280.5-1,284.8 | 407.5-420.6 | 3,904.0-4,019.7 |
-| `privacy` | 129.5-131.4 | 341.7-345.8 | 421.5-425.3 | 1,319.9-1,334.0 | 420.8-426.3 | 4,085.7-4,144.4 |
-| `donate`, `mirror`, `secure` | 110.6-112.5 | 330.1-334.6 | 406.8-411.4 | 1,277.5-1,309.1 | 405.3-410.7 | 4,014.4-4,094.8 |
-| `somethingrare` (no matches) | 129.5-131.2 | 338.3-345.6 | 421.7-423.5 | 1,316.7-1,324.5 | 406.1-423.9 | 4,055.0-4,139.3 |
-
-Each configuration has five samples per workload, run sequentially with all 32 logical CPUs available. The original comparison rotated tool order; fresh samples were collected in configuration blocks with some alternating runs. Timed windows lasted approximately 20-22 seconds after warm-up, bounded by progress reports; fresh samples used approximately 20-second windows after at least 15 seconds of warm-up, excluding GPU setup and automatic tuning. Rates use cumulative candidate-count deltas over measured wall time, not peak displayed rates. Onino's current progress counters are rounded to three significant digits, so its derived rates include that quantization. Multiple prefixes match any listed prefix. The 13-character `somethingrare` prefix produced **zero matches and zero key files in every run**, isolating search throughput from match-saving I/O. [Raw samples](.github/prefix-comparison.csv) are available.
-
-These historical onino CPU-only runs used `--cpu all --gpu off`, with the now-removed `--simd avx2` ceiling for the chart's "AVX2" series and default `--simd auto` for AVX-512 on this host. The former scalar series actually used BMI2+ADX arithmetic; the chart label does not identify an AVX2 arithmetic backend. Its CPU+GPU runs used `--cpu all --gpu auto` with automatic SIMD (AVX-512) and default GPU workload tuning. Onionloom CPU+GPU used `--workers 32 --gpu force --continuous`: `--gpu auto` declines GPU use for some of these prefixes, so forced GPU mode ensures every combined sample actually used both backends. Retained onionloom CPU-only samples used `--gpu off`; mkp224o used `-t 32`.
-
-Tested versions (fresh samples: 2026-10-08; retained CPU-only competitors: 2026-10-06):
-
-- [onino v0.3.0](https://github.com/coalaura/onino/releases/tag/v0.3.0) - PACE Go 1.27.1, `GOAMD64=v1`, PGO disabled; the same GPU-enabled, dynamically linked CGO binary was used for all onino configurations.
-- [onionloom v1.0.1](https://github.com/chrisch88dev/onionloom/releases/tag/v1.0.1) - official Windows release.
-- [mkp224o v1.7.0](https://github.com/cathugger/mkp224o/releases/tag/v1.7.0) - official Windows release.
-- NVIDIA driver 616.64 for both CPU+GPU configurations.
-
-### Windows CPU-only and GPU-only: Prefix32
-
-Onino and [Prefix32 v2.2.0](https://github.com/0xROOTPLS/Prefix32/releases/tag/v2.2.0), compared separately in CPU-only and GPU-only modes on the same **AMD Ryzen 9 9950X3D**, **Windows 11**, **RTX 5090** and **NVIDIA driver 616.64**. Both search the 13-character prefix `somethingrare` (`somethingrare.` in onino's anchored syntax). This rare prefix avoids frequent-match overhead and Prefix32's CPU stop-after-first-match behavior. Normal key-file output remained enabled; every sample produced **zero matches and zero key files**.
-
-**Throughput in million candidates/second. CPU-only and GPU-only show the median (min-max) of five samples; CPU+GPU shows one sample.**
-
-| Mode | Onino v0.3.0 | Prefix32 v2.2.0 `-fast` |
-| --- | ---: | ---: |
-| CPU-only, 32 threads | **1,320.1** (1,316.7-1,324.5) | 472.8 (469.4-475.9) |
-| GPU-only, RTX 5090 | 2,810.0 (2,795.0-2,815.0) | **10,392.3** (10,361.9-10,412.3) |
-| CPU+GPU, 32 threads + RTX 5090 | 4,115.0 (single sample) | - |
-
-On this workload, onino's median CPU-only throughput is **2.79x** Prefix32's and Prefix32's median GPU-only throughput is **3.70x** onino's. The five onino CPU samples are reused unchanged from the 2026-10-08 comparison above. Prefix32 CPU-only, Prefix32 GPU-only and onino GPU-only were measured on **2026-10-11**, sequentially with the three configurations' order rotated each round. A separate onino CPU+GPU run on the same date provides full-machine throughput for context; Prefix32 has no corresponding native combined mode. [Raw samples](.github/prefix32-comparison.csv) include all five configurations; `onino-avx512` identifies the retained CPU series.
-
-The same counter-delta procedure was used: the first progress report at least 15 seconds after process launch starts an approximately 20-second, progress-bounded measurement window. GPU setup and tuning finished before the starting counter snapshot. Prefix32's first GPU run spent approximately 96 seconds autotuning before measurement; subsequent runs reused its cached settings. Rates are cumulative candidate-count deltas divided by externally measured wall time. Both tools print rounded compact counters, so derived rates include that quantization. Prefix32's built-in `--bench` was not used because it substitutes its own prefix.
-
-- **Onino:** the same PACE-built v0.3.0 GPU-enabled binary described above. CPU-only used `--cpu all --gpu off` with automatic AVX-512; GPU-only used `--cpu 0 --gpu auto`, automatically selecting 16,384 streams and one round in every sample. The single CPU+GPU run used `--cpu all --gpu auto`, with 32 CPU workers and automatic GPU tuning selecting 16,384 streams and 12 rounds.
-- **Prefix32:** the official `prefix32-windows-x86_64-fast.exe` release binary, with its newer x86 instruction support. CPU-only used `--threads 32 --count 0 --no-print`; GPU-only added `--gpu --gpu-effort 10` for maximum effort. GPU autotuning selected `BATCH=1024 GS=43520 NB=64` in every sample. `--no-print` affects console key display, not key-file output.
-- All 32 logical CPUs were available to every process. GPU-only modes still use host CPU resources to prepare and coordinate GPU work, but do not run CPU search workers. Prefix32's working directory was each trial's `keys` directory, since it has no output-directory option.
-
-### Linux single-worker rare-prefix runs
-
-One-minute CPU-only searches on three additional machines, each using **one search worker pinned to logical CPU 0** with `taskset -c 0`. The ten-character prefix was `rareprefix` (`rareprefix.` in onino's anchored syntax). Each configuration was run once (with 20s warmup), with no matches found.
-
-- **Debian server:** Debian 12 on bare metal, Intel Xeon E5-1650 v4 @ 3.60 GHz; AVX2, BMI2 and ADX, without AVX-512 or IFMA.
-- **Ubuntu VPS:** Ubuntu 24.04.5 LTS, 4 vCores / 4 threads; guest CPU model `Intel Core Processor (Haswell, no TSX)`. It reports AVX2 and BMI2 but no ADX, AVX-512 or IFMA. Automatic selection used BMI2; the forced BMI2+ADX run successfully executed ADX despite the guest feature report. The model string does not identify the underlying physical CPU.
-- **CachyOS laptop:** HP Pavilion with an AMD Ryzen 7 7840U, connected to power with the `performance` power profile; AVX2, BMI2, ADX and AVX-512 IFMA.
-
-**Progress-report throughput: median [min-max], in million candidates/second.** Statistics use every printed progress rate, excluding startup calibration and final run summaries. Onino reports recent five-second rates; onionloom reports cumulative search averages. Onionloom's output has no per-report timestamps, so its statistics describe those displayed running averages. Ratios compare the progress-report medians; the tools' averaging windows differ.
-
-| Machine | onino selection / backend | onino | onionloom default | Median ratio |
-| --- | --- | ---: | ---: | ---: |
-| Debian server | Auto / BMI2+ADX | **10.5** [10.4-10.6] | 9.04 [8.73-9.05] | **1.16x** |
-| Ubuntu VPS | Auto / BMI2 | **8.19** [7.99-8.35] | 7.05 [6.87-7.15] | **1.16x** |
-| Ubuntu VPS | Forced / BMI2+ADX | **8.49** [8.40-8.60] | 7.05 [6.87-7.15] | **1.20x** |
-| CachyOS laptop | Auto / AVX-512 IFMA | **45.5** [45.5-45.5] | 12.13 [11.89-12.16] | **3.75x** |
-| CachyOS laptop | Forced / BMI2+ADX | **16.5** [16.5-16.6] | 12.13 [11.89-12.16] | **1.36x** |
-
-The [148 progress samples](.github/linux-rare-prefix-progress.csv) retain the printed rates and counters in report order. Medians use the mean of the middle two values for even sample counts; min-max bounds retain the full reported range. The same single onionloom run per machine supplies both comparisons where two onino backends were tested.
-
-Commands used (the VPS placed onino's flags before the pattern):
-
-```sh
-# Automatic backend on each machine:
-timeout -s INT -k 5s 1m taskset -c 0 onino rareprefix. --cpu 1
-
-# Forced BMI2+ADX on the VPS and laptop:
-timeout -s INT -k 5s 1m taskset -c 0 onino rareprefix. --cpu 1 --simd bmi2-adx
-
-# Onionloom on each machine:
-timeout -s INT -k 5s 1m taskset -c 0 ./onionloom search rareprefix --workers 1 --gpu off
-```
-
-`timeout` sent SIGINT at one minute, with a five-second kill grace. Onino's final elapsed times were 60.004-60.015 seconds, including shutdown; its binaries had GPU support disabled. Onionloom's transcript ends with an interruption message and no exact final elapsed time, so its last printed count is retained as a progress count. [Run summaries and exact commands](.github/linux-rare-prefix.csv) preserve all eight runs, the calculated progress statistics and the final reported counts and averages with their timing basis. Empty CSV fields denote unreported values. Binary versions and build commands were not supplied for these Linux runs.
+The [consolidated CSV](.github/benchmarks.csv) contains every sample, exact versions/hashes, commands, build details, hardware and selected runtime settings. Versions: mkp224o v1.7.0, Onionloom 1.0.1, prefix32 v2.2.0; onino `source a4fadc66271d41d6869bc1f0980275f4e177ec13 + working-tree changes`. Unreported competitor compiler flags remain unknown. Earlier [Linux summaries](.github/linux-rare-prefix.csv) and [progress reports](.github/linux-rare-prefix-progress.csv) remain historical records with different workloads/timing.
 
 ## Optimization history
 
