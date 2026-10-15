@@ -64,7 +64,7 @@ jobs:
           output: dist/onino-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.variant }}${{ matrix.os == 'windows' && '.exe' || '' }}
           go-flags: |
             ${{ matrix.variant == 'gpu' && '-tags=gpu' || '' }}
-            ${{ matrix.variant == 'gpu' && matrix.os == 'linux' && '-ldflags=-linkmode=external' || '' }}
+            -ldflags=-X main.version=${{ github.ref_name }} ${{ matrix.variant == 'gpu' && matrix.os == 'linux' && '-linkmode=external' || '' }}
 
       - name: Sign binary
         id: sign

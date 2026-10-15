@@ -12,6 +12,35 @@ import (
 	"github.com/coalaura/onino/internal/search"
 )
 
+func TestVersionFlag(t *testing.T) {
+	flags := []string{"--version", "-v"}
+
+	for _, flag := range flags {
+		var (
+			output bytes.Buffer
+			errors bytes.Buffer
+		)
+
+		command := newCommand()
+		command.Writer = &output
+		command.ErrWriter = &errors
+
+		err := command.Run(context.Background(), []string{"onino", flag})
+		if err != nil {
+			t.Fatalf("%s: %v", flag, err)
+		}
+
+		want := "onino version " + version + "\n"
+		if output.String() != want {
+			t.Fatalf("%s: got %q, want %q", flag, output.String(), want)
+		}
+
+		if errors.Len() != 0 {
+			t.Fatalf("%s: unexpected stderr: %s", flag, errors.String())
+		}
+	}
+}
+
 func TestCPUFlag(t *testing.T) {
 	previous := runtime.GOMAXPROCS(0)
 	defer runtime.GOMAXPROCS(previous)

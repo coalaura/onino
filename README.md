@@ -32,6 +32,8 @@ pace build -o onino .
 
 On Windows, build with `pace build -o onino.exe .` and invoke `./onino.exe`. Stock `go build` is also supported. For an accelerated build, see [GPU support](#gpu-support).
 
+`./onino --version` prints the embedded version, for example `onino version v1.2.3`. Release builds embed their Git tag; local builds report `dev` unless built with `-ldflags "-X main.version=v1.2.3"`.
+
 ```sh
 ./onino --cpu all 'hello.' 'onino.'
 ./onino --patterns prefixes.txt -o onions
@@ -52,6 +54,7 @@ On Windows, build with `pace build -o onino.exe .` and invoke `./onino.exe`. Sto
 | `--gpu-rounds` + | Automatic if omitted | Explicit integer `1-64`; rounds per submission. Requires GPU search enabled. |
 | `--gpu-diagnostics` + | `false` | Boolean; detailed GPU diagnostics on stderr when GPU search is enabled. |
 | `--help`, `-h` | - | Show help for this build. |
+| `--version`, `-v` | - | Print the embedded version and exit. |
 
 + Available only in builds made with `-tags gpu`. Selecting a device with `--gpu` and tuning its workload are separate operations; see [GPU support](#gpu-support).
 

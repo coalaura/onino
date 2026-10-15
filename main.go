@@ -17,6 +17,8 @@ import (
 	"github.com/coalaura/onino/internal/simd"
 )
 
+var version = "dev"
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -35,6 +37,7 @@ func main() {
 func newCommand() *cli.Command {
 	return &cli.Command{
 		Name:        "onino",
+		Version:     version,
 		Usage:       "Continuously search for vanity v3 onion addresses",
 		ArgsUsage:   "[pattern ...]",
 		UsageText:   "onino --cpu all --gpu auto prefix.\n   onino --cpu all --gpu auto --patterns patterns.txt --output results",
