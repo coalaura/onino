@@ -100,22 +100,30 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL validation_message(VkDebugUtilsMessageSeve
 	fprintf(stderr, "Vulkan validation: %s\n", data->pMessage);
 	return VK_FALSE;
 }
-static int buffer_create(onino_gpu *gpu, onino_buffer *buffer, VkDeviceSize size, VkMemoryPropertyFlags properties, char *error, size_t error_size) {
+static VkBufferCreateInfo buffer_info(VkDeviceSize size) {
 	VkBufferCreateInfo info = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size, .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, .sharingMode = VK_SHARING_MODE_EXCLUSIVE };
+	return info;
+}
+static uint32_t memory_type(const VkPhysicalDeviceMemoryProperties *memory, uint32_t bits, VkMemoryPropertyFlags properties) {
+	uint32_t memory_index;
+	for (memory_index = 0; memory_index < memory->memoryTypeCount; memory_index++) {
+		if ((bits & (1u << memory_index)) && (memory->memoryTypes[memory_index].propertyFlags & properties) == properties) { break; }
+	}
+	// Coherency is preferred, not required: flush/invalidate the whole allocation on the fallback path.
+	if (memory_index == memory->memoryTypeCount && (properties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+		properties &= ~VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+		for (memory_index = 0; memory_index < memory->memoryTypeCount; memory_index++) {
+			if ((bits & (1u << memory_index)) && (memory->memoryTypes[memory_index].propertyFlags & properties) == properties) { break; }
+		}
+	}
+	return memory_index;
+}
+static int buffer_create(onino_gpu *gpu, onino_buffer *buffer, VkDeviceSize size, VkMemoryPropertyFlags properties, char *error, size_t error_size) {
+	VkBufferCreateInfo info = buffer_info(size);
 	CHECK(vkCreateBuffer(gpu->device, &info, NULL, &buffer->buffer));
 	VkMemoryRequirements requirements;
 	vkGetBufferMemoryRequirements(gpu->device, buffer->buffer, &requirements);
-	uint32_t memory_index;
-	for (memory_index = 0; memory_index < gpu->memory.memoryTypeCount; memory_index++) {
-		if ((requirements.memoryTypeBits & (1u << memory_index)) && (gpu->memory.memoryTypes[memory_index].propertyFlags & properties) == properties) { break; }
-	}
-	// Coherency is preferred, not required: flush/invalidate the whole allocation on the fallback path.
-	if (memory_index == gpu->memory.memoryTypeCount && (properties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-		properties &= ~VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-		for (memory_index = 0; memory_index < gpu->memory.memoryTypeCount; memory_index++) {
-			if ((requirements.memoryTypeBits & (1u << memory_index)) && (gpu->memory.memoryTypes[memory_index].propertyFlags & properties) == properties) { break; }
-		}
-	}
+	uint32_t memory_index = memory_type(&gpu->memory, requirements.memoryTypeBits, properties);
 	if (memory_index == gpu->memory.memoryTypeCount) { fail(error, error_size, "required Vulkan memory type unavailable", VK_ERROR_FEATURE_NOT_PRESENT); goto failure; }
 	VkMemoryAllocateInfo allocate = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = requirements.size, .memoryTypeIndex = memory_index };
 	buffer->type = memory_index;
@@ -141,6 +149,36 @@ static VkResult buffer_sync(onino_gpu *gpu, onino_buffer *buffer, int upload) {
 	if (buffer->properties & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) { return VK_SUCCESS; }
 	VkMappedMemoryRange range = { .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE, .memory = buffer->memory, .offset = 0, .size = VK_WHOLE_SIZE };
 	return upload ? vkFlushMappedMemoryRanges(gpu->device, 1, &range) : vkInvalidateMappedMemoryRanges(gpu->device, 1, &range);
+}
+static uint32_t automatic_streams(onino_gpu *gpu, const VkPhysicalDeviceLimits *limits, char *error, size_t error_size) {
+	// Vulkan guarantees identical memoryTypeBits for buffers with the same flags and usage.
+	// Probe our shared buffer configuration without allocating or binding any memory.
+	VkBufferCreateInfo info = buffer_info(ONINO_STREAM_BYTES);
+	VkBuffer buffer;
+	CHECK(vkCreateBuffer(gpu->device, &info, NULL, &buffer));
+	VkMemoryRequirements requirements;
+	vkGetBufferMemoryRequirements(gpu->device, buffer, &requirements);
+	vkDestroyBuffer(gpu->device, buffer, NULL);
+	uint32_t types[2] = {
+		memory_type(&gpu->memory, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT),
+		memory_type(&gpu->memory, requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+	};
+	uint64_t limit = 16384;
+	if (limit > limits->maxComputeWorkGroupCount[0]) { limit = limits->maxComputeWorkGroupCount[0]; }
+	if (limit > limits->maxStorageBufferRange / ONINO_STREAM_BYTES) { limit = limits->maxStorageBufferRange / ONINO_STREAM_BYTES; }
+	// Bound allocations to 1/64 of the smallest selected heap, including staging.
+	// The combined per-stream budget also covers shared heaps; taking the minimum never charges a heap twice.
+	// Heap size is a capacity bound, not a claim about currently free driver memory.
+	for (uint32_t index = 0; index < 2; index++) {
+		if (types[index] == gpu->memory.memoryTypeCount) { return fail(error, error_size, "required Vulkan memory type unavailable", VK_ERROR_FEATURE_NOT_PRESENT); }
+		uint32_t heap = gpu->memory.memoryTypes[types[index]].heapIndex;
+		uint64_t budget = gpu->memory.memoryHeaps[heap].size / (64u * ONINO_STREAM_BUDGET);
+		if (limit > budget) { limit = budget; }
+	}
+	if (!limit) { return fail(error, error_size, "insufficient GPU automatic allocation budget", VK_ERROR_OUT_OF_DEVICE_MEMORY); }
+	return (uint32_t)limit;
+failure:
+	return 0;
 }
 
 onino_gpu *onino_open(int index, int validation, uint32_t streams, uint32_t capacity, const void *shader, size_t shader_size, const void *table, size_t table_size, char *error, size_t error_size) {
@@ -212,19 +250,8 @@ onino_gpu *onino_open(int index, int validation, uint32_t streams, uint32_t capa
 	if (!streams) {
 		VkPhysicalDeviceProperties properties;
 		vkGetPhysicalDeviceProperties(gpu->physical, &properties);
-		uint64_t limit = 16384;
-		if (limit > properties.limits.maxComputeWorkGroupCount[0]) { limit = properties.limits.maxComputeWorkGroupCount[0]; }
-		if (limit > properties.limits.maxStorageBufferRange / ONINO_STREAM_BYTES) { limit = properties.limits.maxStorageBufferRange / ONINO_STREAM_BYTES; }
-		// Bound allocations to 1/64 of the smallest participating heap, including staging.
-		// Heap size is a capacity bound, not a claim about currently free driver memory.
-		for (uint32_t type = 0; type < gpu->memory.memoryTypeCount; type++) {
-			if (!(gpu->memory.memoryTypes[type].propertyFlags & (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT))) { continue; }
-			uint32_t heap = gpu->memory.memoryTypes[type].heapIndex;
-			uint64_t budget = gpu->memory.memoryHeaps[heap].size / (64u * ONINO_STREAM_BUDGET);
-			if (limit > budget) { limit = budget; }
-		}
-		if (!limit) { fail(error, error_size, "insufficient GPU automatic allocation budget", VK_ERROR_OUT_OF_DEVICE_MEMORY); goto failure; }
-		streams = (uint32_t)limit;
+		streams = automatic_streams(gpu, &properties.limits, error, error_size);
+		if (!streams) { goto failure; }
 		gpu->stream_count = streams;
 	}
 	VkMemoryPropertyFlags host = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
