@@ -37,7 +37,7 @@ export function collect(root, directory, options, threads) {
 		suffix = windows ? ".exe" : "",
 		binaries = files(join(root, "bin")),
 		tools = {},
-		names = options.only ? [] : ["mkp224o", "onionloom", "prefix32"];
+		names = options.only ? [] : ["mkp224o", "onionloom", "prefix32"].filter(name => !options.baseline || options.replace.split(",").some(id => id.startsWith(`${name}-`)));
 
 	for (const name of names) {
 		const matches = binaries.filter(path => name === "prefix32" ? /^prefix32(?:-.+)?(?:\.exe)?$/.test(basename(path)) && !/\.(txt|zip|gz|md)$/.test(path) : basename(path) === `${name}${suffix}`);
@@ -90,9 +90,9 @@ export function collect(root, directory, options, threads) {
 	tools.onino = {
 		path: onino,
 		sha256: hash(onino),
-		version: options.onino ? "user-supplied; see embedded build information" : `source ${revision}${changes.length ? " + working-tree changes" : ""}`,
+		version: options.release || (options.onino ? "user-supplied; see embedded build information" : `source ${revision}${changes.length ? " + working-tree changes" : ""}`),
 		build: command("go", ["version", "-m", onino], root),
-		build_command: options.onino ? "User-supplied binary; compiler invocation not known" : JSON.stringify(["builder", ...buildArgs]),
+		build_command: options.release ? `User-supplied official ${options.release} release; embedded build settings recorded` : options.onino ? "User-supplied binary; compiler invocation not known" : JSON.stringify(["builder", ...buildArgs]),
 		source_revision: options.onino ? "unknown (user-supplied binary)" : revision,
 		source_sha256: options.onino ? "unknown (user-supplied binary)" : sourceHash.digest("hex"),
 		source_changes: options.onino ? [] : changes.map(path => ({ path: path, sha256: existsSync(join(root, path)) ? hash(join(root, path)) : "deleted" }))

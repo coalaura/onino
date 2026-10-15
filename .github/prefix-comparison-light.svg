@@ -6,45 +6,45 @@
 <text x="30" y="67" font-size="14" fill="#645e70">AMD Ryzen 9 9950X3D 16-Core Processor · 32 available CPU threads</text>
 <text x="30" y="90" font-size="14" fill="#645e70">NVIDIA GeForce RTX 5090 · driver 617.42</text>
 <path d="M340 120V565" stroke="#645e70" opacity="0.18"/><text x="340" y="590" text-anchor="middle" font-size="13" fill="#645e70">0.0</text>
-<path d="M477.5 120V565" stroke="#645e70" opacity="0.18"/><text x="477.5" y="590" text-anchor="middle" font-size="13" fill="#645e70">3,000.0</text>
-<path d="M615 120V565" stroke="#645e70" opacity="0.18"/><text x="615" y="590" text-anchor="middle" font-size="13" fill="#645e70">6,000.0</text>
-<path d="M752.5 120V565" stroke="#645e70" opacity="0.18"/><text x="752.5" y="590" text-anchor="middle" font-size="13" fill="#645e70">9,000.0</text>
-<path d="M890 120V565" stroke="#645e70" opacity="0.18"/><text x="890" y="590" text-anchor="middle" font-size="13" fill="#645e70">12,000.0</text>
+<path d="M477.5 120V565" stroke="#645e70" opacity="0.18"/><text x="477.5" y="590" text-anchor="middle" font-size="13" fill="#645e70">4,000.0</text>
+<path d="M615 120V565" stroke="#645e70" opacity="0.18"/><text x="615" y="590" text-anchor="middle" font-size="13" fill="#645e70">8,000.0</text>
+<path d="M752.5 120V565" stroke="#645e70" opacity="0.18"/><text x="752.5" y="590" text-anchor="middle" font-size="13" fill="#645e70">12,000.0</text>
+<path d="M890 120V565" stroke="#645e70" opacity="0.18"/><text x="890" y="590" text-anchor="middle" font-size="13" fill="#645e70">16,000.0</text>
 <text x="30" y="143" font-size="16">mkp224o CPU</text>
-<rect x="340" y="124" width="5.866137063015572" height="27" rx="3" fill="#8060a5"/>
-<path d="M345.8244607551847 138H345.87538265817193M345.8244607551847 131V145M345.87538265817193 131V145" stroke="#27242d" stroke-width="2"/>
+<rect x="340" y="124" width="4.399602797261679" height="27" rx="3" fill="#8060a5"/>
+<path d="M344.36834556638854 138H344.40653699362895M344.36834556638854 131V145M344.40653699362895 131V145" stroke="#27242d" stroke-width="2"/>
 <text x="1060" y="143" text-anchor="end" font-size="16">128.0</text>
 <text x="30" y="190" font-size="16">Onionloom CPU</text>
-<rect x="340" y="171" width="15.419287864744243" height="27" rx="3" fill="#8060a5"/>
-<path d="M355.264279423569 185H355.4823355196557M355.264279423569 178V192M355.4823355196557 178V192" stroke="#27242d" stroke-width="2"/>
+<rect x="340" y="171" width="11.564465898558183" height="27" rx="3" fill="#8060a5"/>
+<path d="M351.44820956767677 185H351.6117516397418M351.44820956767677 178V192M351.6117516397418 178V192" stroke="#27242d" stroke-width="2"/>
 <text x="1060" y="190" text-anchor="end" font-size="16">336.4</text>
 <text x="30" y="237" font-size="16">Onionloom GPU + 1 CPU worker</text>
-<rect x="340" y="218" width="5.969029610975594" height="27" rx="3" fill="#8060a5"/>
-<path d="M345.51750281711986 232H345.96950581809995M345.51750281711986 225V239M345.96950581809995 225V239" stroke="#27242d" stroke-width="2"/>
+<rect x="340" y="218" width="4.476772208231695" height="27" rx="3" fill="#8060a5"/>
+<path d="M344.1381271128399 232H344.477129363575M344.1381271128399 225V239M344.477129363575 225V239" stroke="#27242d" stroke-width="2"/>
 <text x="1060" y="237" text-anchor="end" font-size="16">130.2</text>
 <text x="30" y="284" font-size="16">Onionloom CPU+GPU</text>
-<rect x="340" y="265" width="18.21664103389709" height="27" rx="3" fill="#8060a5"/>
-<path d="M358.1581127582683 279H358.4232665322215M358.1581127582683 272V286M358.4232665322215 272V286" stroke="#27242d" stroke-width="2"/>
+<rect x="340" y="265" width="13.662480775422818" height="27" rx="3" fill="#8060a5"/>
+<path d="M353.61858456870124 279H353.81744989916615M353.61858456870124 272V286M353.81744989916615 272V286" stroke="#27242d" stroke-width="2"/>
 <text x="1060" y="284" text-anchor="end" font-size="16">397.5</text>
-<text x="30" y="331" font-size="16">Onino CPU</text>
-<rect x="340" y="312" width="59.33407110679386" height="27" rx="3" fill="#8060a5"/>
-<path d="M396.80933797792085 326H399.57144108654927M396.80933797792085 319V333M399.57144108654927 319V333" stroke="#27242d" stroke-width="2"/>
-<text x="1060" y="331" text-anchor="end" font-size="16">1,294.6</text>
-<text x="30" y="378" font-size="16">Onino GPU-only</text>
-<rect x="340" y="359" width="437.7134414491951" height="27" rx="3" fill="#8060a5"/>
-<path d="M775.415044745625 373H780.0049280551943M775.415044745625 366V380M780.0049280551943 366V380" stroke="#27242d" stroke-width="2"/>
-<text x="1060" y="378" text-anchor="end" font-size="16">9,550.1</text>
-<text x="30" y="425" font-size="16">Onino CPU+GPU</text>
-<rect x="340" y="406" width="501.64578800654397" height="27" rx="3" fill="#8060a5"/>
-<path d="M832.8695854756133 420H843.9035987539012M832.8695854756133 413V427M843.9035987539012 413V427" stroke="#27242d" stroke-width="2"/>
-<text x="1060" y="425" text-anchor="end" font-size="16">10,945.0</text>
+<text x="30" y="331" font-size="16">Onino v0.4.1 CPU</text>
+<rect x="340" y="312" width="45.17202473854788" height="27" rx="3" fill="#8060a5"/>
+<path d="M384.5467103626917 326H385.377244358506M384.5467103626917 319V333M385.377244358506 319V333" stroke="#27242d" stroke-width="2"/>
+<text x="1060" y="331" text-anchor="end" font-size="16">1,314.1</text>
+<text x="30" y="378" font-size="16">Onino v0.4.1 GPU-only</text>
+<rect x="340" y="359" width="443.44331797633197" height="27" rx="3" fill="#8060a5"/>
+<path d="M781.7202474316389 373H785.1554019789593M781.7202474316389 366V380M785.1554019789593 366V380" stroke="#27242d" stroke-width="2"/>
+<text x="1060" y="378" text-anchor="end" font-size="16">12,900.2</text>
+<text x="30" y="425" font-size="16">Onino v0.4.1 CPU+GPU</text>
+<rect x="340" y="406" width="491.2899618065874" height="27" rx="3" fill="#8060a5"/>
+<path d="M827.9768112019742 420H831.6141883157595M827.9768112019742 413V427M831.6141883157595 413V427" stroke="#27242d" stroke-width="2"/>
+<text x="1060" y="425" text-anchor="end" font-size="16">14,292.1</text>
 <text x="30" y="472" font-size="16">Prefix32 CPU</text>
-<rect x="340" y="453" width="21.162904838429323" height="27" rx="3" fill="#8060a5"/>
-<path d="M360.884936660687 467H361.3134493795346M360.884936660687 460V474M361.3134493795346 460V474" stroke="#27242d" stroke-width="2"/>
+<rect x="340" y="453" width="15.872178628821995" height="27" rx="3" fill="#8060a5"/>
+<path d="M355.6637024955152 467H355.9850870346509M355.6637024955152 460V474M355.9850870346509 460V474" stroke="#27242d" stroke-width="2"/>
 <text x="1060" y="472" text-anchor="end" font-size="16">461.7</text>
 <text x="30" y="519" font-size="16">Prefix32 GPU-accelerated</text>
-<rect x="340" y="500" width="468.42485093108826" height="27" rx="3" fill="#8060a5"/>
-<path d="M806.982213431427 514H809.787977462729M806.982213431427 507V521M809.787977462729 507V521" stroke="#27242d" stroke-width="2"/>
+<rect x="340" y="500" width="351.31863819831614" height="27" rx="3" fill="#8060a5"/>
+<path d="M690.2366600735702 514H692.3409830970468M690.2366600735702 507V521M692.3409830970468 507V521" stroke="#27242d" stroke-width="2"/>
 <text x="1060" y="519" text-anchor="end" font-size="16">10,220.2</text>
 <text x="30" y="624" font-size="14" fill="#645e70">M candidates/s · median and min–max · 5 runs · ≥15s search warmup · ~20s windows</text>
 </g></svg>

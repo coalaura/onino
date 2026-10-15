@@ -4,11 +4,11 @@ import { fileURLToPath } from "node:url";
 import { availableParallelism } from "node:os";
 import { collect, hash } from "./system.mjs";
 import { trial } from "./trial.mjs";
-import { publish, csv } from "./report.mjs";
+import { publish, csv, readSamples } from "./report.mjs";
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const options = { runs: 5, warmup: 15, seconds: 20, resume: "", onino: "", baseline: "", replace: "", only: "", compare: "", workloads: "", experiment: "", screen: 0, exact: 0, streams: 0, rounds: 0, diagnostics: 0 },
+const options = { runs: 5, warmup: 15, seconds: 20, resume: "", onino: "", release: "", baseline: "", replace: "", only: "", compare: "", workloads: "", experiment: "", screen: 0, exact: 0, streams: 0, rounds: 0, diagnostics: 0 },
 	args = process.argv.slice(2);
 
 for (let index = 0; index < args.length; index++) {
@@ -16,7 +16,8 @@ for (let index = 0; index < args.length; index++) {
 
 	if (name === "help") {
 		console.log("Local experiments: --only onino-gpu,onino-combined,onino-cpu [--compare BASELINE_PATH] [--experiment E01] [--workloads somethingrare,hello,privacy,donate+mirror+secure]. Subsets write samples.csv only within their measurements/ suite; the public CSV and charts contain main comparisons only. --screen 1 permits short rejection screens (not confirmation results).");
-		console.log("bun bench/run.mjs [--onino PATH] [--runs 5] [--warmup 15] [--seconds 20] [--resume measurements/bench-ID] [--baseline measurements/bench-ID --replace CONFIGURATION]\nRequires manually downloaded official mkp224o, Onionloom and Prefix32 executables under bin/. Builds onino with builder (PACE, CGO, gpu); --onino supplies an existing build instead. Runs all modes and workloads, validates counters/modes/saved files, and updates .github/benchmarks.csv, comparison SVGs and README. Logs and saved keys stay under ignored measurements/. Resume continues a stopped suite without rerunning completed attempts. Baseline/replace reruns one configuration in a new suite and retains all other baseline samples verbatim.");
+		console.log("Release refresh: --onino PATH --release v0.4.1 --baseline .github/benchmarks.csv --replace onino-cpu,onino-gpu,onino-combined. Baseline accepts a complete suite directory or its CSV; --replace accepts comma-separated configurations.");
+		console.log("bun bench/run.mjs [--onino PATH] [--runs 5] [--warmup 15] [--seconds 20] [--resume measurements/bench-ID] [--baseline measurements/bench-ID --replace CONFIGURATION[,CONFIGURATION]]\nRequires manually downloaded official mkp224o, Onionloom and Prefix32 executables under bin/. Builds onino with builder (PACE, CGO, gpu); --onino supplies an existing build instead. Runs all modes and workloads, validates counters/modes/saved files, and updates .github/benchmarks.csv, comparison SVGs, index.html and README. Logs and saved keys stay under ignored measurements/. Resume continues a stopped suite without rerunning completed attempts. Baseline/replace refreshes selected configurations in a complete comparison dataset.");
 
 		process.exit(0);
 	}
@@ -46,6 +47,10 @@ if (options.only && options.only.split(",").some(name => !["onino-cpu", "onino-g
 
 if (Boolean(options.baseline) !== Boolean(options.replace) || (options.resume && options.baseline)) {
 	throw new Error("Use --baseline and --replace together, or --resume alone.");
+}
+
+if (options.release && (!options.onino || !/^v\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(options.release))) {
+	throw new Error("--release requires --onino and a release tag such as v0.4.1.");
 }
 
 const directory = options.resume ? resolve(root, options.resume) : join(root, "measurements", `bench-${new Date().toISOString().replace(/[:.]/g, "-")}`);
@@ -103,27 +108,43 @@ let baseline;
 
 if (manifest.options.baseline) {
 	const source = resolve(root, manifest.options.baseline),
-		prior = JSON.parse(readFileSync(join(source, "manifest.json"), "utf8"));
+		snapshot = join(directory, "baseline-samples.csv"),
+		replacements = manifest.options.replace.split(","),
+		fromCSV = source.endsWith(".csv"),
+		prior = fromCSV ? null : JSON.parse(readFileSync(join(source, "manifest.json"), "utf8")),
+		priorRows = existsSync(snapshot) ? readSamples(snapshot) : fromCSV ? readSamples(source) : readdirSync(source).filter(name => /^\d.*\.json$/.test(name)).map(name => JSON.parse(readFileSync(join(source, name), "utf8")));
 
-	if (!configurations.some(config => config.id === manifest.options.replace)) {
+	if (replacements.some(id => !configurations.some(config => config.id === id))) {
 		throw new Error(`Unknown replacement configuration: ${manifest.options.replace}`);
 	}
 
-	if (prior.threads !== manifest.threads || ["cpu", "nvidia", "platform", "release"].some(key => prior.hardware[key] !== manifest.hardware[key]) || ["runs", "warmup", "seconds"].some(key => prior.options[key] !== manifest.options[key])) {
+	const incompatible = priorRows.some(row => row.available_threads !== manifest.threads || ["cpu", "nvidia", "platform", "release"].some(key => row.hardware[key] !== manifest.hardware[key]) || row.settings.warmup_seconds !== manifest.options.warmup || row.settings.measurement_seconds !== manifest.options.seconds);
+
+	if (incompatible || prior && prior.options.runs !== manifest.options.runs) {
 		throw new Error("Replacement suite requires matching hardware, driver, workers and measurement settings.");
 	}
 
-	baseline = new Map(readdirSync(source).filter(name => /^\d.*\.json$/.test(name)).map(name => {
-		const row = JSON.parse(readFileSync(join(source, name), "utf8"));
-
-		return [`${row.round}-${row.configuration}-${row.workload}`, row];
-	}));
+	baseline = new Map(priorRows.map(row => [`${row.round}-${row.configuration}-${row.workload}`, row]));
 
 	if (baseline.size !== manifest.options.runs * configurations.length * workloads.length) {
 		throw new Error("Baseline must contain a complete suite of attempts.");
 	}
 
-	manifest.replacement = { configuration: manifest.options.replace, baseline: source, manifest_sha256: hash(join(source, "manifest.json")), samples_sha256: hash(join(source, "samples.csv")) };
+	for (const config of configurations) {
+		if (replacements.includes(config.id)) {
+			continue;
+		}
+
+		const recorded = priorRows.find(row => row.configuration === config.id);
+
+		manifest.tools[config.tool] ??= recorded.build;
+	}
+
+	if (!existsSync(snapshot)) {
+		writeFileSync(snapshot, csv(priorRows));
+	}
+
+	manifest.replacement ??= { configuration: manifest.options.replace, baseline: source, manifest_sha256: fromCSV ? null : hash(join(source, "manifest.json")), samples_sha256: hash(fromCSV ? source : join(source, "samples.csv")) };
 	writeFileSync(manifestPath, JSON.stringify(manifest, null, "\t"));
 }
 
@@ -148,7 +169,7 @@ for (let round = 0; round < manifest.options.runs; round++) {
 
 			if (existsSync(resultPath)) {
 				row = JSON.parse(readFileSync(resultPath, "utf8"));
-			} else if (baseline && configuration.id !== manifest.options.replace) {
+			} else if (baseline && !manifest.options.replace.split(",").includes(configuration.id)) {
 				row = baseline.get(`${round + 1}-${configuration.id}-${workload}`);
 
 				if (!row) {

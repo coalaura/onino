@@ -8,6 +8,62 @@ export function csv(rows) {
 	return `${fields.join(",")}\n${rows.map(row => fields.map(field => quote(row[field])).join(",")).join("\n")}\n`;
 }
 
+export function readSamples(path) {
+	const text = readFileSync(path, "utf8"),
+		records = [];
+
+	let record = [],
+		field = "",
+		quoted = false;
+
+	for (let index = 0; index < text.length; index++) {
+		const character = text[index];
+
+		if (character === '"') {
+			if (quoted && text[index + 1] === '"') {
+				field = `${field}"`;
+				index++;
+			} else {
+				quoted = !quoted;
+			}
+		} else if (!quoted && (character === "," || character === "\n")) {
+			record.push(field);
+			field = "";
+
+			if (character === "\n") {
+				records.push(record);
+				record = [];
+			}
+		} else if (quoted || character !== "\r") {
+			field = `${field}${character}`;
+		}
+	}
+
+	if (quoted) {
+		throw new Error(`Unterminated CSV field: ${path}`);
+	}
+
+	if (record.length || field) {
+		records.push([...record, field]);
+	}
+
+	const headers = records.shift(),
+		structured = new Set(["command", "build", "hardware", "runtime", "environment", "settings", "selected_setup"]),
+		numeric = new Set(["round", "order", "key_files", "available_threads", "search_workers"]);
+
+	return records.map(values => {
+		if (values.length !== headers.length) {
+			throw new Error(`CSV column count mismatch: ${path}`);
+		}
+
+		return Object.fromEntries(headers.map((name, index) => {
+			const value = values[index];
+
+			return [name, structured.has(name) ? JSON.parse(value) : numeric.has(name) && value !== "" ? Number(value) : value];
+		}));
+	});
+}
+
 function summary(rows, configuration, workload, count) {
 	const samples = rows.filter(row => row.configuration === configuration && row.workload === workload && row.status === "ok").map(row => Number(row.million_per_second)).sort((left, right) => left - right);
 
@@ -79,7 +135,8 @@ function svg(series, manifest, graphics, light) {
 export function publish(root, rows, manifest, configurations, workloads) {
 	writeFileSync(join(root, ".github", "benchmarks.csv"), csv(rows));
 
-	const labels = ["mkp224o CPU", "Onionloom CPU", "Onionloom GPU + 1 CPU worker", "Onionloom CPU+GPU", "Onino CPU", "Onino GPU-only", "Onino CPU+GPU", "Prefix32 CPU", "Prefix32 GPU-accelerated"],
+	const oninoLabel = /^v\d+\./.test(manifest.tools.onino.version) ? `Onino ${manifest.tools.onino.version}` : "Onino",
+		labels = ["mkp224o CPU", "Onionloom CPU", "Onionloom GPU + 1 CPU worker", "Onionloom CPU+GPU", `${oninoLabel} CPU`, `${oninoLabel} GPU-only`, `${oninoLabel} CPU+GPU`, "Prefix32 CPU", "Prefix32 GPU-accelerated"],
 		series = configurations.map((config, index) => ({ label: labels[index], stats: summary(rows, config.id, "somethingrare", manifest.options.runs) })),
 		selectedGPU = rows.flatMap(row => row.selected_setup).find(line => /^GPU\s{2,}(?!disabled)/.test(line)),
 		graphics = manifest.hardware.nvidia.startsWith("unavailable:") ? selectedGPU ?? "GPU unavailable; see dataset" : manifest.hardware.nvidia.split(",").slice(0, 2).join(" · driver");
@@ -132,12 +189,11 @@ export function publish(root, rows, manifest, configurations, workloads) {
 		failureNote = publishingErrors ? " Onionloom's incomplete cells include Windows key-publishing failures in the official binary; failed attempts remain in the CSV." : "",
 		oninoTimeouts = rows.filter(row => row.tool === "onino" && row.notes.includes("startup_or_mode_timeout")).length,
 		timeoutNote = oninoTimeouts ? ` Onino has ${oninoTimeouts} startup/mode timeout attempt(s), retained in the CSV and counted as incomplete.` : "",
-		replacementNote = manifest.replacement ? ` Only ${manifest.replacement.configuration} was rerun for this update; all other samples retain their original measurements and build metadata.` : "",
 		tick = "`";
 
 	const text = `## Benchmarks
 
-Measured ${manifest.started_utc.slice(0, 10)} on **${manifest.hardware.cpu.trim()}**, **${manifest.threads} available CPU threads**, **${manifest.hardware.platform} ${manifest.hardware.release}**, **${graphics}**. Values are median **million candidates/second** from ${manifest.options.runs} runs; higher is better. The primary ${tick}somethingrare${tick} workload produced ${rareKeys} key files.${replacementNote}
+Measured on **${manifest.hardware.cpu.trim()}**, **${manifest.threads} available CPU threads**, **${manifest.hardware.platform} ${manifest.hardware.release}**, **${graphics}**. Values are median **million candidates/second** from ${manifest.options.runs} runs; higher is better. The primary ${tick}somethingrare${tick} workload produced ${rareKeys} key files. Onino ${tick}${manifest.tools.onino.version}${tick}; measurement timestamps and artifact hashes are recorded per sample.
 
 | Configuration | ${tick}somethingrare${tick} | ${tick}hello${tick} | ${tick}privacy${tick} | ${tick}donate${tick}, ${tick}mirror${tick}, ${tick}secure${tick} |
 | --- | ---: | ---: | ---: | ---: |
@@ -149,11 +205,11 @@ ${table.join("\n")}
 	<img alt="Sustained somethingrare throughput: all nine configurations, median and min-max, on a shared zero-based scale." src=".github/prefix-comparison-light.svg">
 </picture>
 
-**Method.** Sequential runs rotate configuration and workload order. Each warms up for ≥${manifest.options.warmup}s after the first observed post-setup search counter, then measures a ~${manifest.options.seconds}s progress-bounded window. Candidate-counter deltas use external monotonic wall time, excluding startup/autotuning. Onino and Prefix32 counters are rounded; mkp224o's cumulative count is reconstructed from its ${tick}-T${tick} average × elapsed time. Precision bounds are recorded. Normal key saving remains enabled and saved prefixes/checksums are checked. Shutdown/save drainage is outside measurement (forced termination on Windows); this measures search throughput, not completed-key delivery.
+**Method.** Sequential runs rotate configuration and workload order. Each warms up for >=${manifest.options.warmup}s after the first observed post-setup search counter, then measures a ~${manifest.options.seconds}s progress-bounded window. Candidate-counter deltas use external monotonic wall time, excluding startup/autotuning. Onino and Prefix32 counters are rounded; mkp224o's cumulative count is reconstructed from its ${tick}-T${tick} average x elapsed time. Precision bounds are recorded. Normal key saving remains enabled and saved prefixes/checksums are checked. Shutdown/save drainage is outside measurement (forced termination on Windows); this measures search throughput, not completed-key delivery.
 
 **Modes and limits.** CPU and CPU+GPU use all available search workers. Onionloom GPU-assisted retains **one CPU search worker**. Onino GPU-only uses host coordination without CPU search. Prefix32 GPU-accelerated uses CPU assistance, **not independent CPU search**. Prefix32 CPU stops on its first match, so shorter workloads have no sustained estimate; surviving runs are not selectively averaged. Its fixed ${tick}prefix32p${tick} ${tick}--bench${tick} is not substituted. Multiple prefixes mean OR. Exits, missing capabilities and invalid samples are explicit; medians require all runs to be valid.${failureNote}${timeoutNote}
 
-**Reproduce:** manually extract unmodified official [mkp224o](https://github.com/cathugger/mkp224o/releases), [Onionloom](https://github.com/chrisch88dev/onionloom/releases) and [Prefix32](https://github.com/0xROOTPLS/Prefix32/releases) releases under ignored ${tick}bin/${tick}, keeping one executable per tool and its shipped libraries. With Bun and the build prerequisites above installed, run **${tick}bun bench/run.mjs${tick}**. It builds onino with builder/PACE, GPU enabled and PGO off, runs all checks, and regenerates this section, the CSV and both SVG themes. ${tick}--onino PATH${tick} accepts an existing build; ${tick}--resume measurements/bench-ID${tick} continues a stopped suite. ${tick}--baseline measurements/bench-ID --replace onino-combined${tick} reruns only Onino CPU+GPU, retaining the other samples and their original metadata. Logs and real keys stay in ignored ${tick}measurements/${tick}; allow about two hours for a full suite. Prefix32's own tuning cache is reused and recorded.
+**Reproduce:** manually extract unmodified official [onino](https://github.com/coalaura/onino/releases), [mkp224o](https://github.com/cathugger/mkp224o/releases), [Onionloom](https://github.com/chrisch88dev/onionloom/releases) and [Prefix32](https://github.com/0xROOTPLS/Prefix32/releases) releases under ignored ${tick}bin/${tick}, keeping one executable per comparison tool and its shipped libraries. Run ${tick}bun bench/run.mjs --onino bin/onino-v0.4.1/onino-windows-amd64-gpu.exe --release v0.4.1${tick} for the full comparison. To refresh the Onino entries, add ${tick}--baseline .github/benchmarks.csv --replace onino-cpu,onino-gpu,onino-combined${tick}. Omitting ${tick}--onino${tick} builds with builder/PACE, GPU enabled and PGO off. The runner validates samples and regenerates this section, the CSV, both SVG themes and the embedded page chart. ${tick}--resume measurements/bench-ID${tick} continues a stopped suite. Logs and real keys stay in ignored ${tick}measurements/${tick}; allow about two hours for a full suite. Prefix32's own tuning cache is reused and recorded.
 
 The [consolidated CSV](.github/benchmarks.csv) contains every sample, exact versions/hashes, commands, build details, hardware and selected runtime settings. Versions: ${manifest.tools.mkp224o.version}, ${manifest.tools.onionloom.version.split("\n")[0]}, ${manifest.tools.prefix32.version}; onino ${tick}${manifest.tools.onino.version}${tick}. Unreported competitor compiler flags remain unknown. Earlier [Linux summaries](.github/linux-rare-prefix.csv) and [progress reports](.github/linux-rare-prefix-progress.csv) remain historical records with different workloads/timing.
 

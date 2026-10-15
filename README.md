@@ -130,9 +130,7 @@ CPU workers usually generate paired candidates around 256 independent affine Edw
 
 ## Benchmarks
 
-The latest [Onino-only GPU study](RESEARCH-GPU.md#14-gpu-arithmetic-and-execution-study-2026-10-14) measured **9.65 → 12.55 billion candidates/s GPU-only (+30.0%)** and **10.95 → 13.85 billion/s combined (+26.5%)** for `somethingrare` on the RTX 5090 below, using five repeated standard benchmark windows and all 32 requested CPU workers in combined mode. CPU-only throughput remained effectively unchanged. Frequent matches remain storage-bound; these results do not promise the same gain on other devices or workloads. The comparison table, chart and CSV below retain the earlier main benchmark measurements. Experimental comparisons and component ablations are documented separately in the study.
-
-Measured 2026-10-14 on **AMD Ryzen 9 9950X3D 16-Core Processor**, **32 available CPU threads**, **win32 10.0.26200**, **NVIDIA GeForce RTX 5090 . driver 617.42**. Values are median **million candidates/second** from 5 runs; higher is better. The primary `somethingrare` workload produced 0 key files. Only onino-combined was rerun for this update; all other samples retain their original measurements and build metadata.
+Measured on **AMD Ryzen 9 9950X3D 16-Core Processor**, **32 available CPU threads**, **win32 10.0.26200**, **NVIDIA GeForce RTX 5090 - driver 617.42**. Values are median **million candidates/second** from 5 runs; higher is better. The primary `somethingrare` workload produced 0 key files. Onino `v0.4.1`; measurement timestamps and artifact hashes are recorded per sample.
 
 | Configuration | `somethingrare` | `hello` | `privacy` | `donate`, `mirror`, `secure` |
 | --- | ---: | ---: | ---: | ---: |
@@ -140,9 +138,9 @@ Measured 2026-10-14 on **AMD Ryzen 9 9950X3D 16-Core Processor**, **32 available
 | Onionloom CPU | 336.4 | incomplete (2/5) | 336.0 | 324.6 |
 | Onionloom GPU + 1 CPU worker | 130.2 | 130.1 | 130.2 | 128.7 |
 | Onionloom CPU+GPU | 397.5 | incomplete (3/5) | 399.4 | incomplete (4/5) |
-| Onino CPU | 1,294.6 | 1,241.9 | 1,295.4 | 1,278.7 |
-| Onino GPU-only | 9,550.1 | 9,499.5 | 9,550.1 | 9,549.9 |
-| Onino CPU+GPU | 10,945.0 | 2,464.9 | incomplete (4/5) | 10,868.7 |
+| Onino v0.4.1 CPU | 1,314.1 | 1,293.7 | 1,316.8 | 1,301.9 |
+| Onino v0.4.1 GPU-only | 12,900.2 | 12,950.1 | 12,900.3 | 11,850.1 |
+| Onino v0.4.1 CPU+GPU | 14,292.1 | incomplete (4/5) | 14,200.8 | 13,863.0 |
 | Prefix32 CPU | 461.7 | stops on match | stops on match | stops on match |
 | Prefix32 GPU-accelerated | 10,220.2 | 7,808.2 | 10,234.7 | 9,892.4 |
 
@@ -156,9 +154,9 @@ Measured 2026-10-14 on **AMD Ryzen 9 9950X3D 16-Core Processor**, **32 available
 
 **Modes and limits.** CPU and CPU+GPU use all available search workers. Onionloom GPU-assisted retains **one CPU search worker**. Onino GPU-only uses host coordination without CPU search. Prefix32 GPU-accelerated uses CPU assistance, **not independent CPU search**. Prefix32 CPU stops on its first match, so shorter workloads have no sustained estimate; surviving runs are not selectively averaged. Its fixed `prefix32p` `--bench` is not substituted. Multiple prefixes mean OR. Exits, missing capabilities and invalid samples are explicit; medians require all runs to be valid. Onionloom's incomplete cells include Windows key-publishing failures in the official binary; failed attempts remain in the CSV. Onino has 1 startup/mode timeout attempt(s), retained in the CSV and counted as incomplete.
 
-**Reproduce:** manually extract unmodified official [mkp224o](https://github.com/cathugger/mkp224o/releases), [Onionloom](https://github.com/chrisch88dev/onionloom/releases) and [Prefix32](https://github.com/0xROOTPLS/Prefix32/releases) releases under ignored `bin/`, keeping one executable per tool and its shipped libraries. With Bun and the build prerequisites above installed, run **`bun bench/run.mjs`**. It builds onino with builder/PACE, GPU enabled and PGO off, runs all checks and regenerates this section, the CSV and both SVG themes. `--onino PATH` accepts an existing build; `--resume measurements/bench-ID` continues a stopped suite. `--baseline measurements/bench-ID --replace onino-combined` reruns only Onino CPU+GPU, retaining the other samples and their original metadata. Logs and real keys stay in ignored `measurements/`; allow about two hours for a full suite. Prefix32's own tuning cache is reused and recorded.
+**Reproduce:** manually extract unmodified official [onino](https://github.com/coalaura/onino/releases), [mkp224o](https://github.com/cathugger/mkp224o/releases), [Onionloom](https://github.com/chrisch88dev/onionloom/releases) and [Prefix32](https://github.com/0xROOTPLS/Prefix32/releases) releases under ignored `bin/`, keeping one executable per comparison tool and its shipped libraries. Run `bun bench/run.mjs --onino bin/onino-v0.4.1/onino-windows-amd64-gpu.exe --release v0.4.1` for the full comparison. To refresh the Onino entries, add `--baseline .github/benchmarks.csv --replace onino-cpu,onino-gpu,onino-combined`. Omitting `--onino` builds with builder/PACE, GPU enabled and PGO off. The runner validates samples and regenerates this section, the CSV, both SVG themes and the embedded page chart. `--resume measurements/bench-ID` continues a stopped suite. Logs and real keys stay in ignored `measurements/`; allow about two hours for a full suite. Prefix32's own tuning cache is reused and recorded.
 
-The [consolidated CSV](.github/benchmarks.csv) contains every sample, exact versions/hashes, commands, build details, hardware and selected runtime settings. Versions: mkp224o v1.7.0, Onionloom 1.0.1, prefix32 v2.2.0; onino `source b45cdaa99f848732da0be33e3f8950350d49b26b + working-tree changes`. Unreported competitor compiler flags remain unknown. Earlier [Linux summaries](.github/linux-rare-prefix.csv) and [progress reports](.github/linux-rare-prefix-progress.csv) remain historical records with different workloads/timing.
+The [consolidated CSV](.github/benchmarks.csv) contains every sample, exact versions/hashes, commands, build details, hardware and selected runtime settings. Versions: mkp224o v1.7.0, Onionloom 1.0.1, prefix32 v2.2.0; onino `v0.4.1`. Unreported competitor compiler flags remain unknown. Earlier [Linux summaries](.github/linux-rare-prefix.csv) and [progress reports](.github/linux-rare-prefix-progress.csv) remain historical records with different workloads/timing.
 
 ## Optimization history
 
