@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://go.ws2.sh/onino">https://go.ws2.sh/onino</a>
   -
-  <a href="http://oninotoroexcwty725epcgcfzkc3kzktglmsyakucxkgqnqx7mpizryd.onion">http://oninotoroexcwty725epcgcfzkc3kzktglmsyakucxkgqnqx7mpizryd.onion</a>
+  <a href="http://oninomineh2zdbnlcy7q5dairwr4c2v6mg3bf6isji7oqjkbn3ci44qd.onion">http://oninomineh2zdbnlcy7q5dairwr4c2v6mg3bf6isji7oqjkbn3ci44qd.onion</a>
 </p>
 
 onino searches for vanity Tor v3 `.onion` addresses using CPU workers with optional Vulkan GPU acceleration. It matches the first **52 visible hostname characters**, saves usable service keys and keeps searching. By default it uses one CPU search worker and no GPU.
