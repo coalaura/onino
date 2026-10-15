@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -36,6 +37,7 @@ type presentation struct {
 	previous    progressSample
 	phase       string
 	configured  bool
+	exact       bool
 	done        chan struct{}
 	finishOnce  sync.Once
 	cancel      context.CancelFunc
@@ -68,6 +70,7 @@ func (reporter *presentation) start(ctx context.Context, setup searchSetup, esti
 	reporter.setup = setup
 	reporter.estimate = estimate
 	reporter.monitor = monitor
+	reporter.exact = os.Getenv("ONINO_EXACT_COUNTERS") == "1"
 	reporter.previous = progressSample{time: reporter.started}
 	reporter.done = make(chan struct{})
 

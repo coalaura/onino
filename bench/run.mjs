@@ -8,7 +8,7 @@ import { publish, csv } from "./report.mjs";
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-const options = { runs: 5, warmup: 15, seconds: 20, resume: "", onino: "", baseline: "", replace: "", only: "", compare: "", workloads: "", experiment: "", screen: 0 },
+const options = { runs: 5, warmup: 15, seconds: 20, resume: "", onino: "", baseline: "", replace: "", only: "", compare: "", workloads: "", experiment: "", screen: 0, exact: 0, streams: 0, rounds: 0, diagnostics: 0 },
 	args = process.argv.slice(2);
 
 for (let index = 0; index < args.length; index++) {
@@ -32,8 +32,12 @@ if (![0, 1].includes(options.screen) || !Number.isInteger(options.runs) || optio
 	throw new Error("Require at least five runs, 15 seconds warmup and 20 seconds target measurement.");
 }
 
-if ((options.compare || options.workloads || options.experiment || options.screen) && !options.only || options.only && (options.baseline || options.replace)) {
+if ((options.compare || options.workloads || options.experiment || options.screen || options.exact || options.streams || options.rounds || options.diagnostics) && !options.only || options.only && (options.baseline || options.replace)) {
 	throw new Error("Local experiment options require --only and cannot use --baseline/--replace.");
+}
+
+if (![0, 1, 2].includes(options.exact) || ![0, 1].includes(options.diagnostics) || !Number.isInteger(options.streams) || options.streams < 0 || options.streams > 32768 || !Number.isInteger(options.rounds) || options.rounds < 0 || options.rounds > 64) {
+	throw new Error("Require --exact 0 (rounded), 1 (exact), or 2 (rounded with snapshots), --diagnostics 0/1, --streams 0-32768 and --rounds 0-64; zero uses automatic selection.");
 }
 
 if (options.only && options.only.split(",").some(name => !["onino-cpu", "onino-gpu", "onino-combined"].includes(name))) {

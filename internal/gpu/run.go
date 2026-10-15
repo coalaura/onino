@@ -211,7 +211,7 @@ func Run(ctx context.Context, plan Plan, matcher *pattern.Matcher, save search.S
 
 	worker := verifier{seeds: make([]seed, maximum), matcher: matcher, save: save}
 
-	options.Monitor.Observe(func() search.Stats {
+	options.Monitor.ObserveGPU(func() search.Stats {
 		saved := worker.saved.Load()
 
 		return search.Stats{Checked: checked.Load(), Saved: saved}

@@ -68,7 +68,7 @@ func reconstruct(secret [64]byte, steps uint32) (onion.Key, error) {
 }
 
 func makeTable(plan Plan) []uint32 {
-	table := make([]uint32, (pairCount+1)*24+8*4+1+(pairCount+1)*8)
+	table := make([]uint32, (pairCount+1)*24+8*4+1+(pairCount+1)*8+1)
 
 	var squares [pairCount + 1]field.Element
 
@@ -118,7 +118,25 @@ func makeTable(plan Plan) []uint32 {
 		putLimbs(table[position+(pairCount/2+index)*8:position+(pairCount/2+index+1)*8], product.Bytes())
 	}
 
-	putLimbs(table[position+pairCount*8:], squares[pairCount].Bytes())
+	putLimbs(table[position+pairCount*8:][:8], squares[pairCount].Bytes())
+
+	table[len(table)-1] = 1
+	narrow := true
+
+	for index := uint32(0); index < plan.count; index++ {
+		probe := plan.probes[index]
+		narrow = narrow && probe[1] == 0
+
+		if bits.OnesCount32(probe[0])+bits.OnesCount32(probe[1]) < 12 {
+			table[len(table)-1] = 0
+
+			break
+		}
+	}
+
+	if narrow && table[len(table)-1] != 0 {
+		table[len(table)-1] = 2
+	}
 
 	return table
 }

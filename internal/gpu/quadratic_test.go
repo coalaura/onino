@@ -42,7 +42,7 @@ func TestQuadraticTable(t *testing.T) {
 	jump := quadraticInteger(table[pairCount*24+16:][:8])
 	jump.Mul(jump, jump).Mod(jump, prime)
 
-	if jump.Cmp(quadraticInteger(table[position+pairCount*8:])) != 0 {
+	if jump.Cmp(quadraticInteger(table[position+pairCount*8:][:8])) != 0 {
 		t.Fatal("jump square")
 	}
 }

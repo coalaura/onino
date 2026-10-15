@@ -144,6 +144,41 @@ func TestUnifiedProgress(t *testing.T) {
 	}
 }
 
+func TestExactBackendProgress(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		monitor := search.NewMonitor()
+		defer monitor.Stop()
+
+		monitor.Observe(func() search.Stats {
+			return search.Stats{Checked: 123, Saved: 2}
+		})
+
+		monitor.ObserveGPU(func() search.Stats {
+			return search.Stats{Checked: 456, Saved: 3}
+		})
+
+		var output bytes.Buffer
+
+		reporter := startTestProgress(context.Background(), &output, matchEstimate{}, monitor)
+		reporter.exact = true
+
+		time.Sleep(5 * time.Second)
+
+		synctest.Wait()
+
+		monitor.Stop()
+		<-reporter.done
+
+		if !strings.Contains(output.String(), "ONINO_COUNTER sample_ns=5000000000 read_ns=0 cpu=123 gpu=456 saved=5") {
+			t.Fatalf("lost backend counters or monotonic boundary: %s", output.String())
+		}
+
+		if monitor.Snapshot() != (search.Stats{Checked: 579, Saved: 5}) {
+			t.Fatal("combined snapshot differs from backend counters")
+		}
+	})
+}
+
 func TestDelayedProgressSampling(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var checked atomic.Uint64

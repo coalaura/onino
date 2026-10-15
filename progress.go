@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	"github.com/coalaura/onino/internal/search"
 )
 
 const reportInterval = 5 * time.Second
@@ -80,10 +83,14 @@ func (reporter *presentation) sample(ctx context.Context) {
 	default:
 	}
 
-	stats := reporter.monitor.Snapshot()
+	before := time.Now()
+	cpu, gpu := reporter.monitor.Backends()
+
+	after := time.Now()
+	stats := search.Stats{Checked: cpu.Checked + gpu.Checked, Saved: cpu.Saved + gpu.Saved}
 
 	// Sampling time includes scheduling and output delays, not a ticker timestamp.
-	sample := progressSample{checked: stats.Checked, time: time.Now()}
+	sample := progressSample{checked: stats.Checked, time: after}
 
 	rate := sample.rateSince(reporter.previous)
 	reporter.previous = sample
@@ -91,6 +98,12 @@ func (reporter *presentation) sample(ctx context.Context) {
 	line := appendSearchStatus(reporter.buffer[:0], stats, sample.time.Sub(reporter.started), rate, reporter.estimate, reporter.phase)
 
 	reporter.write(reporter.stderr, line)
+
+	if reporter.exact && reporter.phase == "" {
+		line = fmt.Appendf(reporter.buffer[:0], "ONINO_COUNTER sample_ns=%d read_ns=%d cpu=%d gpu=%d saved=%d\n", after.Sub(reporter.started).Nanoseconds(), after.Sub(before).Nanoseconds(), cpu.Checked, gpu.Checked, stats.Saved)
+
+		reporter.write(reporter.stderr, line)
+	}
 }
 
 func checkedRate(checked uint64, elapsed time.Duration) float64 {

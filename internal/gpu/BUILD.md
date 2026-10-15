@@ -4,13 +4,14 @@ Normal builds require neither CGO nor Vulkan. For the GPU backend, use Go 1.27.1
 
 On Windows, build with `builder build go --cgo --pace --dyn --no-gen -tags gpu`. Omit `--pace` for stock Go.
 
-Linux requires dynamic linking against a libc compatible with the installed Vulkan loader and driver. Fully static musl GPU binaries are not supported. On a glibc Linux host with GCC, use `CGO_ENABLED=1 CC=gcc pace build -tags gpu -ldflags=-linkmode=external .`. For the verified Windows-to-Linux amd64 cross-build, run this in a POSIX shell with Zig and PACE on PATH:
+Linux requires dynamic linking against a libc compatible with the installed Vulkan loader and driver. Fully static musl GPU binaries are not supported. Builder 0.5.6 with Zig and PACE passed the following Windows-to-Linux cross-builds:
 
 ```sh
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1 CC="zig cc -target x86_64-linux-gnu.2.31" pace build -trimpath -buildvcs=false -ldflags=-linkmode=external -tags gpu -o onino-linux .
+builder build go linux --arch amd64 --cgo --pace --dyn --compat --no-gen --output onino-linux-amd64 -tags gpu -pgo=off
+builder build go linux --arch arm64 --cgo --pace --dyn --compat --no-gen --output onino-linux-arm64 -tags gpu -pgo=off
 ```
 
-Replace `pace` with `go` for stock Go. Builder 0.5.5 also passed `builder build go linux --arch amd64 --cgo --pace --gnu --dyn --compat --no-gen -tags gpu`; explicitly selecting `--gnu` avoids the musl-target issue in older invocations using `--dyn` alone. Verify that the Linux artifact has an ELF interpreter such as `/lib64/ld-linux-x86-64.so.2` and a dynamic libc dependency; a successful link alone does not establish that the driver can be loaded. The installed driver may impose a newer libc requirement than the application's selected baseline.
+Omit `--pace` for stock Go. These are compilation checks, not Linux runtime validation. Verify that the Linux artifact has an ELF interpreter such as `/lib64/ld-linux-x86-64.so.2` and a dynamic libc dependency; a successful link alone does not establish that the driver can be loaded. The installed driver may impose a newer libc requirement than the application's selected baseline.
 
 GPU builds add `--gpu off|auto|<index>`, defaulting to `off`. With GPU search enabled, `--cpu 0` and `--cpu off` both disable CPU search workers; the host still performs GPU orchestration, match verification and storage. For example, `onino --gpu auto --cpu off somethingrare.` searches only on the GPU; `onino --gpu auto --cpu 1 somethingrare.` also runs one pinned CPU worker when topology information is available. `auto` prefers a capable discrete device; an explicit index follows Vulkan physical-device enumeration. Initialization errors are reported rather than silently falling back to CPU search.
 
@@ -20,28 +21,25 @@ Omitted `--gpu-streams` and `--gpu-rounds` values are calibrated with the reques
 
 ## Shader generation
 
-The checked-in shaders were generated with glslang 16.0.0 and SPIRV-Tools from Vulkan SDK 1.4.328.1. The optimized glslang generation route was selected by the E10 comparison; it adds no runtime dependency. Run these commands from the repository root, with those tools on PATH:
+The checked-in shaders were generated with glslang 16.0.0 (`-Os`) and SPIRV-Tools v2025.4, targeting Vulkan 1.3. The controlled F06 comparison retained this route; it adds no runtime dependency. Use Bun and explicit executable paths from the repository root. Create the manifest's parent directory first if it does not exist:
 
 ```sh
-glslang -V --target-env vulkan1.3 -Os internal/gpu/shaders/search.comp -o internal/gpu/shaders/search.spv
-spirv-val --target-env vulkan1.3 internal/gpu/shaders/search.spv
-glslang -V --target-env vulkan1.3 -Os internal/gpu/shaders/arithmetic.comp -o internal/gpu/shaders/arithmetic.spv
-spirv-val --target-env vulkan1.3 internal/gpu/shaders/arithmetic.spv
-glslang -V --target-env vulkan1.3 -Os -DONINO_DIAGNOSTIC=1 internal/gpu/shaders/search.comp -o internal/gpu/shaders/diagnostic.spv
-spirv-val --target-env vulkan1.3 internal/gpu/shaders/diagnostic.spv
-glslang -V --target-env vulkan1.3 -Os -DONINO_INITIAL_STEPS=4294967167u internal/gpu/shaders/search.comp -o internal/gpu/shaders/epoch.spv
-spirv-val --target-env vulkan1.3 internal/gpu/shaders/epoch.spv
+bun internal/gpu/generate.mjs tools/vulkan-sdk/Bin/glslang.exe tools/vulkan-sdk/Bin/spirv-val.exe measurements/generation.json
 ```
 
-The arithmetic, full-encoding and epoch-boundary diagnostic shaders are embedded only in correctness tests. The epoch variant changes the initial step counter to exercise exhaustion without traversing billions of candidates. Source edits require regenerating and validating the affected SPIR-V before testing. There is deliberately no automatic SDK download or shader compilation during normal builds.
+The generator checks every exit code, compiles into a fresh directory, validates all four modules, and only then replaces the embedded artifacts. The JSON manifest records executable paths and versions, complete commands and diagnostics, source hashes and output hashes. A compiler or validator failure leaves all embedded modules untouched. Temporary outputs are retained beside the manifest for inspection. For a controlled alternative, supply a glslc executable and append `glslc`; that route uses `-O`. Run actual-device correctness tests after either route: valid SPIR-V alone does not establish correct arithmetic.
+
+The arithmetic, full-encoding and epoch-boundary diagnostic shaders are embedded only in correctness tests. The epoch variant changes the initial step counter to exercise exhaustion without traversing billions of candidates. Source edits require regenerating all four modules before testing. There is deliberately no automatic SDK download or shader compilation during normal builds. Slang 2026.19 compiled and validated the study's original source but failed full device correctness; it is not a supported generation route.
 
 Search specialization constant 0 selects preparation (0), inversion (1) or reconstruction (2); constant 1 selects local size 128, 64 or 128 respectively. All three pipelines use the same embedded module. Preparation and reconstruction each execute one round per dispatch; the bridge supplies the inter-dispatch Vulkan memory dependencies. The 128 pairs per stream are distinct from the runtime stream count and rounds per submission. Explicit stream counts up to 32,768 are allowed subject to device and submission limits; automatic allocation remains capped at 16,384. Regenerate all four modules after changing shared field arithmetic.
 
-Preparation uses precomputed quadratic denominator pairs and stops at four frontier products. Packed inversion combines and expands that frontier with a 600-step, 30-step-batched modular inverse. Reconstruction uses a conservative two-word prefix test only when every probe has at least twelve constrained bits; survivors always receive exact field multiplication and canonical matching. These choices do not change candidate enumeration or CPU responsibilities. Calibration stops exploring when durable-save backpressure prevents a useful GPU-capacity measurement.
+Preparation uses precomputed quadratic denominator pairs and stops at eight frontier products (cut depth three). Packed inversion combines and expands that frontier with a 600-step, 30-step-batched modular inverse. The host resolves filter eligibility once from actual probe masks. Reconstruction uses a conservative low-word filter when all high masks are zero, otherwise the existing two-word filter; both require every probe to have at least twelve constrained bits. Other workloads use exact products directly. Both signs and both provisional alternatives share one probe traversal; survivors always receive exact field multiplication and canonical matching. These choices do not change candidate enumeration or CPU responsibilities. Calibration stops exploring when durable-save backpressure prevents a useful GPU-capacity measurement.
 
 ## Device correctness checks
 
-Set `ONINO_VULKAN_TEST=1` and make `VK_LAYER_KHRONOS_validation` available to the Vulkan loader (using `VK_LAYER_PATH` if needed), then run `builder test go --cgo --pace --dyn --no-gen -tags gpu -vet=off -p=1 ./...`. Device tests require validation and fail on validation errors. Set `VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT` to include synchronization validation. Tests select physical device zero by default; `ONINO_VULKAN_DEVICE` overrides the index. Without the environment opt-in, device tests skip, allowing compilation and host-only tests on systems without Vulkan. Repeat without `--pace` for stock Go. Use `vet --tests --tags gpu --cgo` for custom static checks. Timing runs must leave validation disabled.
+Set `ONINO_VULKAN_TEST=1` and make `VK_LAYER_KHRONOS_validation` available to the Vulkan loader (using `VK_LAYER_PATH` if needed), then run `builder test go --cgo --pace --dyn --no-gen -tags gpu -vet=off -p=1 .`. Device tests require validation and fail on validation errors. Set `VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT` to include synchronization validation. Tests select physical device zero by default; `ONINO_VULKAN_DEVICE` overrides the index. Without the environment opt-in, device tests skip, allowing compilation and host-only tests on systems without Vulkan. Repeat without `--pace` for stock Go. Use `vet --tests --tags gpu --cgo . ./internal/...` for custom static checks. Timing runs must leave validation disabled.
+
+For local benchmark comparisons, `bun bench/run.mjs --only onino-gpu,onino-combined --onino PATH --compare REFERENCE --experiment NAME --exact 1 --workloads somethingrare --runs 5 --warmup 15 --seconds 30` reads opt-in exact completed CPU/GPU publication counters over common process-monotonic intervals. `--streams` and `--rounds` fix existing GPU controls; zero leaves automatic selection. `--exact 2` emits exact lines but uses rounded counters for overhead controls. Normal progress is unchanged. Sampling does not drain the GPU; unpublished CPU batches and in-flight GPU work remain endpoint uncertainty. JSON records backend deltas and durable saves separately; historical rounded results retain their precision bounds. Use Bun explicitly: on systems where `node.cmd` redirects to Bun, `node --check` can execute the harness instead of checking syntax. A parser-only check can use `new Bun.Transpiler({loader: "js"}).transformSync(source)` without importing the harness.
 
 ## Optional phase profiling
 

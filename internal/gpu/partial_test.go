@@ -17,10 +17,13 @@ func TestPartialProductShader(t *testing.T) {
 
 	random := rand.New(rand.NewPCG(20261014, 2))
 
-	commands := make([]command, 8192)
+	commands := make([]command, 8448)
 	expected := make([][32]byte, len(commands))
 
-	corrections := 0
+	var (
+		corrections int
+		lowWraps    int
+	)
 
 	for index := range commands {
 		update := &commands[index]
@@ -51,6 +54,18 @@ func TestPartialProductShader(t *testing.T) {
 				encoded := littleInteger(second)
 				putLimbs(update.Center[8:16], encoded[:])
 			}
+		}
+
+		if index >= 8192 {
+			// Force long carry chains in both operands, beyond the random cases.
+			first.Sub(limit, big.NewInt(int64(index-8191)))
+			second := new(big.Int).Sub(limit, big.NewInt(int64(8448-index)))
+
+			firstEncoded := littleInteger(first)
+			secondEncoded := littleInteger(second)
+
+			putLimbs(update.Center[:8], firstEncoded[:])
+			putLimbs(update.Center[8:16], secondEncoded[:])
 		}
 
 		second := quadraticInteger(update.Center[8:16])
@@ -89,6 +104,10 @@ func TestPartialProductShader(t *testing.T) {
 			t.Fatalf("necessary condition at %d", index)
 		}
 
+		if uint32(word) > ^uint32(0)-19 && uint32(residue) == uint32(word)+19 {
+			lowWraps++
+		}
+
 		binary.LittleEndian.PutUint64(expected[index][:], word)
 	}
 
@@ -96,10 +115,32 @@ func TestPartialProductShader(t *testing.T) {
 		t.Fatal("missing quotient correction coverage")
 	}
 
+	if lowWraps == 0 {
+		t.Fatal("missing low-word correction wraparound coverage")
+	}
+
+	checkRawShader(t, commands, expected)
+
+	for index := range commands {
+		commands[index].Action = 18
+		clear(expected[index][4:])
+	}
+
 	checkRawShader(t, commands, expected)
 }
 
 func TestSelectiveProbeResumption(t *testing.T) {
+	masks := []uint64{0x0000000000000fff, 0xfff0000000000000, 0x010101010101ffff, 0xf0f0f0f000000000, 0xaaaaaaaa55555555, 0xffffffffffffffff, 0x000000000000ffff, 0xffff000000000000}
+	checkSelectiveProbeResumption(t, masks)
+}
+
+func TestNarrowProbeResumption(t *testing.T) {
+	masks := []uint64{0x00000fff, 0xfff00000, 0x0101ffff, 0xf0f0f0f0, 0xaaaa5555, 0xffffffff, 0x0000ffff, 0xffff0000}
+	checkSelectiveProbeResumption(t, masks)
+}
+
+func checkSelectiveProbeResumption(t *testing.T, masks []uint64) {
+	t.Helper()
 	requireVulkan(t)
 
 	state, initial, err := newSeed(1)
@@ -130,7 +171,6 @@ func TestSelectiveProbeResumption(t *testing.T) {
 
 	plan := Plan{count: 8}
 	targets := []int{97, 98, 300, 301, 650, 651, 97, 98}
-	masks := []uint64{0x0000000000000fff, 0xfff0000000000000, 0x010101010101ffff, 0xf0f0f0f000000000, 0xaaaaaaaa55555555, 0xffffffffffffffff, 0x000000000000ffff, 0xffff000000000000}
 
 	for index, target := range targets {
 		mask := masks[index]

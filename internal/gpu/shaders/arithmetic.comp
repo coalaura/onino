@@ -51,6 +51,7 @@ void main() {
 			break;
 		case 16: result = canonical(squareComplement(command.first)); break;
 		case 17: result = canonical(inverse(command.first)); break;
+		case 18: result = small(0); result.limb[0] = provisionalProductLow(command.first, command.second); break;
 		default: result = inverse(command.first); break;
 	}
 	if (command.operation >= 8) {

@@ -10,7 +10,7 @@
 #endif
 
 const uint pairCount = 128;
-const uint frontierCount = 4;
+const uint frontierCount = 8;
 const uint prepareFirst = 0;
 const uint reconstructLast = 4;
 
@@ -23,7 +23,7 @@ struct Command { Affine center; uint expected; uint generation; uint action; };
 struct Probe { uint lowMask; uint highMask; uint lowValue; uint highValue; };
 struct Hit { uint stream; uint generation; uint steps; uint kind; uint low; uint high; };
 layout(std430, binding = 0) buffer Streams { Stream streams[]; };
-layout(std430, binding = 1) readonly buffer Tables { Affine offsets[pairCount + 1]; Probe probes[8]; uint probeCount; Field pairSums[pairCount / 2]; Field pairProducts[pairCount / 2]; Field jumpSquare; };
+layout(std430, binding = 1) readonly buffer Tables { Affine offsets[pairCount + 1]; Probe probes[8]; uint probeCount; Field pairSums[pairCount / 2]; Field pairProducts[pairCount / 2]; Field jumpSquare; uint filterMode; };
 layout(std430, binding = 2) buffer Commands { Command commands[]; };
 layout(std430, binding = 3) buffer Results { uint count; uint checked; uint pending; uint reserved; Hit hits[]; };
 layout(push_constant) uniform Parameters { uint work; uint capacity; uint collectOnly; uint phase; } parameters;
@@ -62,6 +62,18 @@ void publish(uint streamIndex) {
 		hits[destination] = Hit(streamIndex, stream.generation, stream.hitSteps, stream.kind, stream.low, stream.high);
 		streams[streamIndex].status = 2;
 	} else { atomicAdd(pending, 1); }
+}
+bool matchesWord(Probe probe, uint64_t word) {
+	return (uint(word) & probe.lowMask) == probe.lowValue && (uint(word >> 32) & probe.highMask) == probe.highValue;
+}
+bvec2 possiblePair(uint64_t plusWord, uint64_t minusWord) {
+	bvec2 result = bvec2(false);
+	for (uint index = 0; index < probeCount; index++) {
+		Probe probe = probes[index];
+		result.x = result.x || matchesWord(probe, plusWord) || matchesWord(probe, plusWord + 19ul);
+		result.y = result.y || matchesWord(probe, minusWord) || matchesWord(probe, minusWord + 19ul);
+	}
+	return result;
 }
 void main() {
 	// Adjacent invocations invert independent stream roots, with a separate 64-lane pipeline.
@@ -164,15 +176,16 @@ void main() {
 		Field minusNumerator = sub(productY, productX);
 		Field plusReciprocal = add(reciprocal, factor);
 		Field minusReciprocal = sub(reciprocal, factor);
-		bool selective = true;
-		for (uint index = 0; index < probeCount; index++) {
-			selective = selective && bitCount(probes[index].lowMask) + bitCount(probes[index].highMask) >= 12;
-		}
+		bool selective = filterMode != 0;
 		bool possible = true;
-		if (selective) {
+		if (filterMode == 2) {
+			uint provisionalPlus = provisionalProductLow(plusNumerator, plusReciprocal);
+			uint provisionalMinus = provisionalProductLow(minusNumerator, minusReciprocal);
+			possible = any(possiblePair(uint64_t(provisionalPlus), uint64_t(provisionalMinus)));
+		} else if (selective) {
 			uint64_t provisionalPlus = provisionalProductWord(plusNumerator, plusReciprocal);
 			uint64_t provisionalMinus = provisionalProductWord(minusNumerator, minusReciprocal);
-			possible = any(matchesPair(provisionalPlus, provisionalMinus)) || any(matchesPair(provisionalPlus + 19ul, provisionalMinus + 19ul));
+			possible = any(possiblePair(provisionalPlus, provisionalMinus));
 		}
 		Field plus = small(0);
 		Field minus = small(0);

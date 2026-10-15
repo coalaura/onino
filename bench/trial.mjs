@@ -6,7 +6,19 @@ import { cache } from "./system.mjs";
 
 const scales = { "": 1, k: 1e3, K: 1e3, M: 1e6, G: 1e9, B: 1e9, T: 1e12, P: 1e15, E: 1e18 };
 
-export function counter(tool, line) {
+export function counter(tool, line, exact = false) {
+	if (tool === "onino" && exact) {
+		const match = line.match(/^ONINO_COUNTER sample_ns=(\d+) read_ns=(\d+) cpu=(\d+) gpu=(\d+) saved=(\d+)$/);
+		if (!match) {
+			return null;
+		}
+		const values = match.slice(1).map(Number);
+		if (values.some(value => !Number.isSafeInteger(value)) || !Number.isSafeInteger(values[2] + values[3])) {
+			throw new Error("Exact counter exceeds safe integer range");
+		}
+		return { count: values[2] + values[3], error: 0, basis: "exact published CPU/GPU counters; common process-monotonic read bracket; asynchronous backend publication", time: values[0] / 1e9, read_ns: values[1], cpu: values[2], gpu: values[3], saved: values[4] };
+	}
+
 	if (tool === "mkp224o") {
 		const match = line.match(/calc\/sec:([\d.]+).*elapsed:([\d.]+)sec/);
 		if (match) {
@@ -48,7 +60,7 @@ export function counter(tool, line) {
 	return null;
 }
 
-function invocation(tool, config, prefixes, keys, threads) {
+function invocation(tool, config, prefixes, keys, threads, options) {
 	const gpu = config.id.endsWith("gpu") || config.id.endsWith("combined");
 
 	if (tool === "mkp224o") {
@@ -60,7 +72,7 @@ function invocation(tool, config, prefixes, keys, threads) {
 	}
 
 	if (tool === "onino") {
-		return ["--cpu", config.workers ? String(config.workers) : "off", ...(gpu ? ["--gpu", "auto"] : []), "--output", keys, ...prefixes.map(prefix => `${prefix}.`)];
+		return ["--cpu", config.workers ? String(config.workers) : "off", ...(gpu ? ["--gpu", "auto", ...(options.streams ? ["--gpu-streams", String(options.streams)] : []), ...(options.rounds ? ["--gpu-rounds", String(options.rounds)] : []), ...(options.diagnostics ? ["--gpu-diagnostics"] : [])] : []), "--output", keys, ...prefixes.map(prefix => `${prefix}.`)];
 	}
 
 	return ["--no-print", ...(gpu ? ["--gpu", "--gpu-effort", "10"] : ["--threads", String(threads), "--count", "0"]), ...prefixes];
@@ -170,11 +182,15 @@ export async function trial(manifest, config, workload, round, order, directory)
 
 	mkdirSync(keys, { recursive: true });
 
-	const args = invocation(config.tool, config, prefixes, keys, manifest.threads);
+	const args = invocation(config.tool, config, prefixes, keys, manifest.threads, manifest.options);
 
 	const settings = {
 		experiment: manifest.options.experiment || "",
 		screen: Boolean(manifest.options.screen),
+		exact: manifest.options.exact || 0,
+		streams: manifest.options.streams || 0,
+		rounds: manifest.options.rounds || 0,
+		diagnostics: manifest.options.diagnostics || 0,
 		warmup_seconds: manifest.options.warmup,
 		measurement_seconds: manifest.options.seconds,
 		rotation: "round/workload cyclic configuration rotation; workloads rotate each round",
@@ -257,6 +273,7 @@ export async function trial(manifest, config, workload, round, order, directory)
 
 	const child = spawn(tool.path, args, {
 		cwd: keys,
+		env: { ...process.env, ONINO_EXACT_COUNTERS: manifest.options.exact ? "1" : "0" },
 		stdio: ["ignore", "pipe", "pipe"],
 		windowsHide: true
 	});
@@ -284,7 +301,7 @@ export async function trial(manifest, config, workload, round, order, directory)
 			setup.push(line);
 		}
 
-		const sample = counter(config.tool, line);
+		const sample = counter(config.tool, line, manifest.options.exact === 1);
 
 		if (!sample || sample.count <= 0) {
 			return;
@@ -298,7 +315,8 @@ export async function trial(manifest, config, workload, round, order, directory)
 			return;
 		}
 
-		sample.time = time;
+		sample.arrival_s = time;
+		sample.time ??= time;
 		sample.line = line;
 
 		const previous = snapshots.at(-1);
@@ -319,9 +337,9 @@ export async function trial(manifest, config, workload, round, order, directory)
 			deadline = time + manifest.options.warmup + manifest.options.seconds + 120;
 		}
 
-		if (!start && time - first.time >= manifest.options.warmup) {
+		if (!start && sample.time - first.time >= manifest.options.warmup) {
 			start = sample;
-		} else if (start && time - start.time >= manifest.options.seconds - 0.05) {
+		} else if (start && sample.time - start.time >= manifest.options.seconds - 0.05) {
 			end = sample;
 
 			stop();
@@ -441,6 +459,14 @@ export async function trial(manifest, config, workload, round, order, directory)
 		row.elapsed_s = end.time - start.time;
 		row.delta = end.count - start.count;
 		row.counter_error_bound_mps = (end.error + start.error) / row.elapsed_s / 1e6;
+		if (manifest.options.exact === 1) {
+			row.cpu_delta = end.cpu - start.cpu;
+			row.gpu_delta = end.gpu - start.gpu;
+			row.cpu_million_per_second = row.cpu_delta / row.elapsed_s / 1e6;
+			row.gpu_million_per_second = row.gpu_delta / row.elapsed_s / 1e6;
+			row.saved_delta = end.saved - start.saved;
+			row.read_bracket_ns = start.read_ns + end.read_ns;
+		}
 
 		if (row.delta <= end.error + start.error) {
 			row.status = "invalid";
