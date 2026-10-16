@@ -999,12 +999,6 @@
 				color: var(--background);
 			}
 
-			@media (min-width: 1000px) {
-				.search-block pre {
-					min-height: 95px;
-				}
-			}
-
 			@media (max-width: 1050px) {
 				.page-shell {
 					padding: 0 32px;
@@ -1461,10 +1455,99 @@
 						</div>
 					</details>
 
-					<section class="machine-benchmarks" aria-labelledby="machine-title">
-						<p class="eyebrow">HISTORICAL RESEARCH / SERVER / VPS / LAPTOP</p>
+					<section id="runpod-benchmarks" class="machine-benchmarks" aria-labelledby="runpod-title">
+						<p class="eyebrow">RUNPOD / GPU SEARCH</p>
 
-						<h3 id="machine-title">Earlier single-worker Linux measurements.</h3>
+						<h3 id="runpod-title">Three GPUs, the same prefix.</h3>
+
+						<p class="benchmark-intro">GPU measurements on RunPod, searching for <code>somethingrare</code> with onino and Prefix32 v2.2.0. Each tool ran once per GPU for approximately two minutes.</p>
+						<p class="benchmark-hardware">Ubuntu 22.04 <span>/</span> October 15, 2026 <span>/</span> onino CPU search disabled</p>
+
+						<div class="machine-grid">
+							<article class="machine-result" aria-labelledby="runpod-blackwell-title">
+								<p class="machine-category">BLACKWELL / US-PA-1</p>
+								<h4 id="runpod-blackwell-title">RTX PRO 6000</h4>
+								<p class="machine-system">Blackwell Server Edition . Driver 615.71.09</p>
+								<p class="machine-backend">Auto / 16,384 streams / 13 rounds</p>
+
+								<div class="machine-ratio"><strong>12.6G</strong><span>onino full-run average keys/s</span></div>
+
+								<dl class="machine-rates">
+									<div>
+										<dt>onino final recent rate</dt>
+										<dd>12.9</dd>
+									</div>
+									<div>
+										<dt>Prefix32 final reported rate</dt>
+										<dd>10.3</dd>
+									</div>
+								</dl>
+								<p class="machine-unit">Billion keys/s . final progress reports</p>
+							</article>
+							<article class="machine-result" aria-labelledby="runpod-4090-title">
+								<p class="machine-category">ADA LOVELACE / EU-CZ-1</p>
+								<h4 id="runpod-4090-title">GeForce RTX 4090</h4>
+								<p class="machine-system">Driver 610.57.04</p>
+								<p class="machine-backend">Auto / 16,384 streams / 4 rounds</p>
+
+								<div class="machine-ratio"><strong>10.3G</strong><span>onino full-run average keys/s</span></div>
+
+								<dl class="machine-rates">
+									<div>
+										<dt>onino final recent rate</dt>
+										<dd>10.6</dd>
+									</div>
+									<div>
+										<dt>Prefix32 final reported rate</dt>
+										<dd>6.92</dd>
+									</div>
+								</dl>
+								<p class="machine-unit">Billion keys/s . final progress reports</p>
+							</article>
+							<article class="machine-result" aria-labelledby="runpod-3090-title">
+								<p class="machine-category">AMPERE / EU-CZ-1</p>
+								<h4 id="runpod-3090-title">GeForce RTX 3090</h4>
+								<p class="machine-system">Driver 610.57.04</p>
+								<p class="machine-backend">Auto / 16,384 streams / 5 rounds</p>
+
+								<div class="machine-ratio"><strong>4.16G</strong><span>onino full-run average keys/s</span></div>
+
+								<dl class="machine-rates">
+									<div>
+										<dt>onino final recent rate</dt>
+										<dd>4.23</dd>
+									</div>
+									<div>
+										<dt>Prefix32 final reported rate</dt>
+										<dd>4.29</dd>
+									</div>
+								</dl>
+								<p class="machine-unit">Billion keys/s . final progress reports</p>
+							</article>
+						</div>
+
+						<p class="machine-method-note">onino leads on the RTX PRO 6000 and RTX 4090 while leaving the CPU essentially idle during steady-state search: no CPU search workers, just lightweight host coordination and match verification. Prefix32 v2.2.0 uses up to 12 CPU threads to prepare work for each GPU dispatch. On the RTX 3090, Prefix32 is slightly ahead.</p>
+						<p class="machine-method-note">onino's full-run averages include startup and autotuning. The progress rates use each tool's own reporting window; these single-run observations are separate from the repeated, externally timed suite above.</p>
+
+						<details class="benchmark-details">
+							<summary>Commands, hardware and test conditions</summary>
+							<p>onino used Vulkan with <code>onino --cpu off --gpu auto somethingrare.</code>. Prefix32 used OpenCL with <code>./prefix32-v2.2.0-linux-x86_64-fast --gpu --gpu-effort 10 somethingrare</code>. Both commands search for the same 13-character prefix. All onino runs saved zero matches.</p>
+							<p>Prefix32's GPU path calls <code>precompute_start_pts</code> before each dispatch, using <code>num_cpus::get().min(12)</code> to parallelize starting-point generation on the CPU. This is GPU preparation, not independent CPU search, and does not imply 12 continuously busy cores. The logs do not include CPU-utilization percentages.</p>
+							<p>onino's elapsed times were 120.888s, 121.245s and 121.444s for the RTX PRO 6000, RTX 4090 and RTX 3090 respectively. Its final recent rates are the reports at 2m0s. Prefix32's final reports were at 2m00s, 2m02s and 2m01s, after autotuning; the rates shown are search results, not tuning peaks.</p>
+							<p>The RTX PRO 6000 host exposed 36 vCPUs on an Intel Xeon 6960P. The RTX 4090 and RTX 3090 hosts exposed 36 and 32 vCPUs respectively on AMD EPYC 7763 processors. All used the <code>runpod/base:1.0.3-ubuntu2204</code> image.</p>
+							<p>Prefix32 selected BATCH=1024 on the RTX PRO 6000, BATCH=256 on the RTX 4090 and BATCH=512 on the RTX 3090. Its BATCH=1024 tuning attempts on the latter two GPUs exceeded the shared-memory limit and were skipped. The logs record Prefix32 v2.2.0; the onino binary version was not recorded.</p>
+						</details>
+
+						<div class="benchmark-source-links">
+							<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/runpod-benchmarks.md">RunPod logs and hardware details</a>
+							<a class="text-link" href="https://github.com/0xROOTPLS/Prefix32/blob/v2.2.0/src/gpu.rs#L625-L654">Prefix32 v2.2.0 CPU preparation</a>
+						</div>
+					</section>
+
+					<section class="machine-benchmarks" aria-labelledby="machine-title">
+						<p class="eyebrow">CPU / SERVER / VPS / LAPTOP</p>
+
+						<h3 id="machine-title">Single-worker Linux measurements.</h3>
 
 						<p class="benchmark-intro">
 							onino also leads onionloom on an Intel server, a Haswell-class VPS and an AMD laptop. Each uses one CPU worker and automatic backend selection.
@@ -1628,7 +1711,6 @@
 							<div class="benchmark-source-links">
 								<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/linux-rare-prefix-progress.csv">148 progress samples</a>
 								<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/linux-rare-prefix.csv">Run summaries and commands</a>
-								<a class="text-link" href="https://github.com/coalaura/onino/blob/master/.github/linux-rare-prefix.csv">Historical Linux samples</a>
 							</div>
 						</details>
 					</section>
@@ -1669,7 +1751,7 @@
 								<span class="step-number">02 /</span>
 								<h3>Start searching</h3>
 							</div>
-							<div class="code-block search-block">
+							<div class="code-block">
 								<div class="code-toolbar">
 									<div class="mode-selector" role="group" aria-label="Search mode">
 										<button type="button" class="mode-button active" aria-pressed="true" data-mode="cpu">CPU</button>
